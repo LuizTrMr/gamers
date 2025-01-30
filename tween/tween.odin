@@ -122,6 +122,11 @@ update :: proc(manager: ^Manager, dt: f32) {
 	}
 }
 
+is_tween_done :: proc(manager: Manager, handle: Handle) -> bool {
+	tween := manager.pool[handle]
+	return tween.t >= tween.total_duration
+}
+
 Interpolation_Type :: enum {
 	linear,
 

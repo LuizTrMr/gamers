@@ -29,13 +29,13 @@ roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 //    / /-`---'-\ \
 //     /         \
 
-V2        :: linalg.Vector2f32
-V4        :: linalg.Vector4f32
-normalize :: linalg.vector_normalize0
-length    :: linalg.vector_length
-length2   :: linalg.vector_length2
-dot       :: linalg.vector_dot
-distance  :: linalg.distance
+V2         :: linalg.Vector2f32
+V4         :: linalg.Vector4f32
+normalize  :: linalg.vector_normalize0
+length     :: linalg.vector_length
+length2    :: linalg.vector_length2
+dot        :: linalg.vector_dot
+distance   :: linalg.distance
 array_cast :: linalg.array_cast
 
 V2_ZERO  : V2 : {0, 0}

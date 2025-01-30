@@ -16,19 +16,10 @@ when PLATFORM == "RAYLIB" {
 	}
 
 	poll_keys :: proc() {
-		rl.PollInputEvents()
 	}
 
-	// is_key_down :: proc(key: Key) -> bool {
-	// 	return key_to_state[key].keydown
-	// }
-
-	// is_key_pressed :: proc(key: Key) -> bool {
-	// 	return key_to_state[key].pressed
-	// }
-
-	// is_key_pressed :: proc(key: Key) -> bool {
-	// 	return rl.IsKeyPressed(cast(rl.KeyboardKey) key)
-	// }
+	get_mouse_position :: proc "contextless" () -> [2]f32 {
+		return rl.GetMousePosition()
+	}
 
 }

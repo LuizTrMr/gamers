@@ -27,6 +27,7 @@ Key :: enum i32 { // TODO: Add all of the keyyyyyyyyyyyyyyyyys
 	j = 74,
 	k = 75,
 
+	p = 80,
 	q = 81,
 	r = 82,
 	s = 83,
@@ -43,14 +44,16 @@ Key :: enum i32 { // TODO: Add all of the keyyyyyyyyyyyyyyyyys
 	arrow_up    = 265,
 }
 
-Key_State :: struct {
-	half_transitions: i32,
-	ended_down      : bool,
-	mappings        : []Key,
+process_action :: proc(keys: []Key) -> (state: State) {
+	for key in keys {
+		if is_key_pressed(key) do state.is_pressed = true
+		if is_key_down(key)    do state.is_down = true
+	}
+	return
 }
 
 State :: struct {
-	keydown: bool,
-	pressed: bool,
+	is_down   : bool,
+	is_pressed: bool,
 }
 key_to_state: #sparse [Key]State
