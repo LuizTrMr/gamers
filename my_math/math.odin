@@ -2,6 +2,7 @@ package my_math
 
 import "base:intrinsics"
 
+import "core:slice"
 import "core:fmt"
 import "core:math/linalg"
 import "core:math"
@@ -30,6 +31,7 @@ roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 //     /         \
 
 V2         :: linalg.Vector2f32
+V3         :: linalg.Vector3f32
 V4         :: linalg.Vector4f32
 normalize  :: linalg.vector_normalize0
 length     :: linalg.vector_length
@@ -129,55 +131,117 @@ cubic_bezier :: proc "contextless" (p0, p1, p2, p3: V2, t: f32) -> V2 {
 }
 
 Spline_Type :: enum {
-	B_Spline,
-	Catmull_Spline,
-	Line_Spline,
+	catmull,
+	line,
+	// B_Spline, // NOTE(04/02/25): I don't want to think about implementation if I am not gonna use it (which currently is the case)
 }
 
 Spline :: struct {
+	type: Spline_Type,
+	control_points: []V3, // NOTE(04/02/25): `z` value is used to store the segments length for uniform velocities
+
 	u: f32,
 	total_u: f32,
-	control_points: []V2,
-	type: Spline_Type,
+
+	constant_speed: bool,
+	f: f32, // NOTE(04/02/25): Same as `u`, but used for constant speed
+	total_length: f32,
 }
 
-create_spline :: proc(points: []V2, type: Spline_Type) -> (result: Spline) {
-	if type == .B_Spline || type == .Catmull_Spline { // DEBUG: Remove
-		assert(len(points) >= 4, fmt.tprintfln("We have only %v points: %v", len(points), points))
-	} else {
+create_spline :: proc(points: []V3, type: Spline_Type, constant_speed := true) -> (spline: Spline) {
+	spline.type           = type
+	spline.control_points = points
+	spline.constant_speed = constant_speed
+	switch type {
+	case .line:
 		assert(len(points) >= 2, fmt.tprintfln("We have only %v points: %v", len(points), points))
+		spline.total_u = cast(f32)len(points) - 1
+		spline.total_length = 1.0 // just so it is bigger than 0
+		if spline.constant_speed {
+			for i in 0..<len(points)-1 { // and I could calculate the lengths in advance when I build the final release of the game
+				assert(points[i].z == 0)
+				spline.control_points[i].z  = distance(spline.control_points[i].xy, spline.control_points[i+1].xy)
+				spline.total_length        += spline.control_points[i].z
+			}
+		}
+
+	case .catmull:
+		assert(len(points) >= 4, fmt.tprintfln("We have only %v points: %v", len(points), points))
+		spline.total_u = cast(f32)len(points) - 3
+		spline.total_length = 1.0 // just so it is bigger than 0
+
+		// If I want constant speed:
+		if spline.constant_speed {
+			for i in 0..<len(points)-3 { // and I could calculate the lengths in advance when I build the final release of the game
+				assert(points[i].z == 0)
+				spline.control_points[i].z  = catmull_spline_calculate_segment_length(spline.control_points, i)
+				spline.total_length        += spline.control_points[i].z
+			}
+		}
 	}
-	result.control_points = points
-	result.total_u = type == .Line_Spline ? cast(f32) len(points) - 1 : cast(f32)len(points) - 2 - 1
-	result.type = type
 	return
 }
 
-calculate :: proc(spline: ^Spline, delta: f32) -> (result: V2) {
+increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
 	switch spline.type {
-		case .B_Spline:
-			result = b_spline(spline, delta)
-		case .Catmull_Spline:
-			result = catmull_spline(spline, delta)
-		case .Line_Spline:
-			result = line_spline(spline, delta)
+	case .catmull: result = catmull_spline_increment(spline, delta, speed)
+	case .line   : result = line_spline_increment(spline, delta, speed)
 	}
 	return
 }
 
-line_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
+get_normalized_offset :: proc(spline: Spline, offset: f32) -> (result: f32) {
+	offset := offset
+	i: int
+	for offset > spline.control_points[i].z {
+		offset -= spline.control_points[i].z
+		i += 1
+	}
+
+	result = f32(i) + (offset / spline.control_points[i].z)
+	return
+}
+
+line_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
+	assert(u >= 0)
+
 	u_int := int(u)
 	t     := u - f32(u_int)
-	result = lerp(control_points[u_int], control_points[u_int+1], t)
-	u += delta
+	result = lerp(control_points[u_int], control_points[u_int+1], t).xy
 	return
 }
 
-catmull_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
+line_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
+	if spline.constant_speed {
+		defer { spline.f += delta * speed }
+		offset := get_normalized_offset(spline^, spline.f)
+		result  = line_get_point(spline.control_points, offset)
+	} else {
+		defer { spline.u += delta }
+		result = line_get_point(spline.control_points, spline.u)
+	}
+	return
+}
+
+catmull_spline_calculate_segment_length :: proc(control_points: []V3, u_int: int) -> (length: f32) { // Source: https://www.youtube.com/watch?v=DzjtU4WLYNs
+	step: f32: 0.005
+	
+	old, new: V2
+	old = control_points[u_int].xy
+	for t: f32 = 0.0; t < 1.0; t += step {
+		new     = catmull_spline_get_point(control_points, f32(u_int)+t)
+		length += distance(old, new)
+		old     = new
+	}
+	return
+}
+
+catmull_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
+	assert(u >= 0)
 	u_int := int(u)
 
-	p0 := u_int
-	p1 := p0 + 1
+	p1 := u_int + 1
+	p0 := p1-1
 	p2 := p1 + 1
 	p3 := p2 + 1
 
@@ -190,36 +254,46 @@ catmull_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
 	q2 := -3*t3 + 4*t2 + t
 	q3 := t3 - t2
 
-	u += delta
-
-	result = 0.5 * (control_points[p0]*q0 + control_points[p1]*q1 + control_points[p2]*q2 + control_points[p3]*q3)
-
+	result = 0.5 * (control_points[p0].xy*q0 + control_points[p1].xy*q1 + control_points[p2].xy*q2 + control_points[p3].xy*q3)
 	return
 }
 
-b_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
-	u_int := int(u)
-
-	p0 := u_int
-	p1 := p0 + 1
-	p2 := p1 + 1
-	p3 := p2 + 1
-
-	t  := u - f32(u_int)
-	t2 := t*t
-	t3 := t*t*t
-
-	q0 := -t3 + 3*t2 - 3*t + 1
-	q1 := 3*t3 - 6*t2 + 4
-	q2 := -3*t3 + 3*t2 + 3*t + 1
-	q3 := t3
-
-	u += delta
-
-	result = 0.1666 * (control_points[p0]*q0 + control_points[p1]*q1 + control_points[p2]*q2 + control_points[p3]*q3)
-
+catmull_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
+	if spline.constant_speed {
+		defer { spline.f += delta * speed }
+		offset := get_normalized_offset(spline^, spline.f)
+		result  = catmull_spline_get_point(spline.control_points, offset)
+	} else {
+		defer { spline.u += delta }
+		result = catmull_spline_get_point(spline.control_points, spline.u)
+	}
 	return
 }
+
+// b_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
+// 	return 0
+	// u_int := int(u)
+
+	// p0 := u_int
+	// p1 := p0 + 1
+	// p2 := p1 + 1
+	// p3 := p2 + 1
+
+	// t  := u - f32(u_int)
+	// t2 := t*t
+	// t3 := t*t*t
+
+	// q0 := -t3 + 3*t2 - 3*t + 1
+	// q1 := 3*t3 - 6*t2 + 4
+	// q2 := -3*t3 + 3*t2 + 3*t + 1
+	// q3 := t3
+
+	// u += delta
+
+	// result = 0.1666 * (control_points[p0]*q0 + control_points[p1]*q1 + control_points[p2]*q2 + control_points[p3]*q3)
+
+	// return
+// }
 
 //         (__) 
 //         (oo)  @Interpolation and @Easings!
