@@ -13,9 +13,7 @@ import "core:log"
 
 // TODO: Use `(` and `)` to put metadata, e.g.: Union type, number of elements of slice
 
-// TODO: Tentar melhorar isso pra eu compartilhar no github com geral
-//   - Eu podia adicionar uma constante que diz se vc quer LOGGING ou não, e aí: when LOG do log.infof("Blarg")
-//   - E se o parser tivesse uma variável que diz o nome do field que ele tá parseando atualmente pra ter uns logs/asserts/panics melhores?
+ERROR :: "\033[31mERROR\033[0m"
 
 @(private="file")
 indent_pls :: #force_inline proc(sb: ^strings.Builder, indentation: int) {
@@ -271,13 +269,9 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 serialize_to_file :: proc(a: any, path: string) {
 	assert(a != nil, "a is `nil`")
 
-	contents: string
-	{
-		sb := strings.builder_make(context.temp_allocator)
-		serialize_to_string(a, &sb, 0)
-		contents = strings.to_string(sb)
-	}
-	assert(contents != "")
+	builder := strings.builder_make(context.temp_allocator)
+	serialize_to_string(a, &builder, 0)
+	contents := strings.to_string(builder)
 
 	sb := strings.builder_make(context.temp_allocator)
 	strings.write_string(&sb, path)
@@ -287,8 +281,9 @@ serialize_to_file :: proc(a: any, path: string) {
 	full_path := strings.to_string(sb)
 
 	ok := os.write_entire_file(full_path, transmute([]byte) contents)
-	assert(ok)
+	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file: %v", full_path))
 }
+
 
 deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocator)) {
 	assert(a != nil, "a is `nil`")
@@ -310,7 +305,7 @@ deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocat
 	full_path := strings.to_string(sb)
 
 	contents, ok := os.read_entire_file(full_path, context.temp_allocator)
-	assert(ok, fmt.tprintln("Could not read file: ", full_path))
+	assert(ok, fmt.tprintln(ERROR + ": Could not read file: ", full_path))
 
 	lexer := lexer_make(string(contents))
 	lex(&lexer)
@@ -397,7 +392,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 				expect(parser^, found, fmt.tprintf("Couldn't find a value for key: %v", key) )
 				expect(parser^, index < info.count, fmt.tprintf("I don't know what happened here, key value: ", key) )
 
-				expect(parser^, advance(parser).kind == .Column )
+				expect(parser^, advance(parser).kind == .Colon )
 				index_ptr := rawptr(uintptr(a.data) + uintptr(index*info.elem_size))
 				index_any := any{index_ptr, info.elem.id}
 
@@ -457,7 +452,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			bit_data: u64 = 0
 
 			value_token := advance(parser)
-			expect(parser^, value_token.kind == .Stream, fmt.tprintf("Token = %v", token))
+			expect(parser^, value_token.kind == .Stream || value_token.kind == .Curly_Bracket_Close, fmt.tprintf("Token = %v", token))
 
 			for value_token.kind != .Curly_Bracket_Close {
 				enum_value, ok := reflect.enum_from_name_any(info.elem.id, value_token.text)
@@ -549,7 +544,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			token := advance(parser)
 			for token.kind != .Curly_Bracket_Close {
 				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
-				expect(parser^, parser.curr_token.kind == .Column)
+				expect(parser^, parser.curr_token.kind == .Colon)
 				key := token.text
 
 				found: bool
@@ -557,7 +552,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 					if field.name != key do continue
 
 					found = true
-					expect(parser^,  advance(parser).kind == .Column )
+					expect(parser^,  advance(parser).kind == .Colon )
 					if field.tag == "no_deserialize" {
 						// log.warnf("Don't forget to deserialize the field %v for the %v type", field.name, a) TODO: Do this or nah?
 						token := advance(parser)
@@ -600,7 +595,9 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			token := advance(parser)
 			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
 			f, ok := strconv.parse_f64(token.text)
-			assert(ok)
+			if !ok {
+				fmt.println("Failed to convert to float:", token.text)
+			}
 			assign_float(a, f)
 
 		case reflect.Type_Info_Array:
@@ -627,7 +624,7 @@ Token_Kind :: enum {
 	Parenthesis_Open,
 	Parenthesis_Close,
 
-	Column,
+	Colon,
 	Stream,
 	End,
 }
@@ -688,7 +685,7 @@ grab_line :: proc(lexer: Lexer, index: int) -> string {
 expect :: proc(parser: Parser, condition: bool, message: string = "", loc := #caller_location, expr := #caller_expression(condition)) {
 	if !condition {
 		source_file_index := parser.lexer.tokens[parser.cursor-1].start
-		fmt.printfln("\033[31mERROR\033[0m at %v:", loc)
+		fmt.printfln(ERROR + " at %v:", loc)
 		fmt.printfln("Failed to parse file `%v` at line `%v`:\n%v",
 					 parser.path,
 					 line_of(parser.lexer, source_file_index), // NOTE: `line_of` and `grab_line` are subpar quality
@@ -800,7 +797,7 @@ lex :: proc(lexer: ^Lexer) {
 				lexer.cursor += 1
 
 			case ':':
-				token.kind = .Column
+				token.kind = .Colon
 				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
 				lexer.cursor += 1
 
