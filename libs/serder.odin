@@ -203,6 +203,7 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 			strings.write_byte(sb, '\n')
 
 			for field, i in reflect.struct_fields_zipped(a.id) {
+				if contains_tag(field.tag, "deprecated") do continue
 				indent_pls(sb, indentation+4)
 				strings.write_string(sb, field.name)
 				strings.write_byte(sb, ':')
@@ -264,6 +265,15 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 	}
 
 	strings.write_byte(sb, '\n')
+}
+
+contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> bool {
+	tags := strings.split(string(struct_tags), " ", context.temp_allocator)
+	fmt.println(tags)
+	for t in tags {
+		if t == tag_name do return true
+	}
+	return false
 }
 
 serialize_to_file :: proc(a: any, path: string) {
@@ -553,7 +563,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 					found = true
 					expect(parser^,  advance(parser).kind == .Colon )
-					if field.tag == "no_deserialize" {
+					if contains_tag(field.tag, "no_deserialize") {
 						// log.warnf("Don't forget to deserialize the field %v for the %v type", field.name, a) TODO: Do this or nah?
 						token := advance(parser)
 						if token.kind == .Curly_Bracket_Open {
