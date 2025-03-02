@@ -269,7 +269,6 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 
 contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> bool {
 	tags := strings.split(string(struct_tags), " ", context.temp_allocator)
-	fmt.println(tags)
 	for t in tags {
 		if t == tag_name do return true
 	}
