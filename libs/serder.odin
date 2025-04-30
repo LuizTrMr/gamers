@@ -1,7 +1,6 @@
 package gamers_libs
 
 import "base:intrinsics"
-import "base:runtime"
 
 import "core:fmt"
 import "core:mem"
@@ -12,6 +11,7 @@ import "core:strconv"
 import "core:log"
 
 // TODO: Use `(` and `)` to put metadata, e.g.: Union type, number of elements of slice
+// TODO: Better error message for: `panic: Could not find value: cannons_main for enum of type Texture_Id`
 
 ERROR :: "\033[31mERROR\033[0m"
 
@@ -293,6 +293,28 @@ serialize_to_file :: proc(a: any, path: string) {
 	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file: %v", full_path))
 }
 
+deserialize_from_data :: proc(a: any, data: []byte, label: string, allocator: Maybe(mem.Allocator)) {
+	assert(a != nil, "a is `nil`")
+	a := a
+	a = reflect.any_base(a)
+
+	ti := type_info_of(a.id)
+	if !reflect.is_pointer(ti) || ti.id == rawptr {
+		panic("NOT A POINTER")
+	}
+	underlying_id := ti.variant.(reflect.Type_Info_Pointer).elem.id
+
+	lexer := lexer_make(string(data))
+	lex(&lexer)
+
+	alloc, is_valid := allocator.?
+	if !is_valid do alloc = context.allocator // If `nil` is passed just use context.allocator
+	parser := parser_make(lexer, label, alloc)
+
+	data := any{(^rawptr)(a.data)^, underlying_id}
+	deserialize_from_string(data, &parser)
+	assert(parser.curr_token.kind == .End)
+}
 
 deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocator)) {
 	assert(a != nil, "a is `nil`")
@@ -371,7 +393,7 @@ assign_float :: proc(v: any, f: $T) {
 
 @(private="file")
 deserialize_from_string :: proc(a: any, parser: ^Parser) {
-	assert(a != nil, "a is `nil`")
+	assert(a != nil, fmt.tprintfln("a is `nil` while trying to parse: %v", parser.path))
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
 	#partial switch info in ti.variant {
@@ -602,7 +624,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 		case reflect.Type_Info_Float:
 			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
+			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
 			f, ok := strconv.parse_f64(token.text)
 			if !ok {
 				fmt.println("Failed to convert to float:", token.text)

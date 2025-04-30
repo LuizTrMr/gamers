@@ -21,6 +21,17 @@ roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 	return cast(i32)(v + 0.5)
 }
 
+cbrt :: proc "contextless" (f: f32) -> f32 {
+	return math.pow(f, 1/3)
+}
+
+normalize_f32 :: proc(start, end, value: f32) -> f32 {
+	res := (value - start) / (end - start)
+	assert( 0 <= res && res <= 1 )
+	return res
+}
+
+
 //    /\
 //   ( /   @ @    ()   @V2 stuff!
 //    \  __| |__  /
@@ -30,21 +41,30 @@ roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 //    / /-`---'-\ \
 //     /         \
 
-V2         :: linalg.Vector2f32
-V3         :: linalg.Vector3f32
-V4         :: linalg.Vector4f32
-normalize  :: linalg.vector_normalize0
-length     :: linalg.vector_length
-length2    :: linalg.vector_length2
-dot        :: linalg.vector_dot
-distance   :: linalg.distance
-array_cast :: linalg.array_cast
+V2            :: linalg.Vector2f32
+V3            :: linalg.Vector3f32
+V4            :: linalg.Vector4f32
+normalize_v2  :: linalg.vector_normalize0
+normalize     :: proc{normalize_f32, normalize_v2}
+length        :: linalg.vector_length
+length2       :: linalg.vector_length2
+dot           :: linalg.vector_dot
+distance      :: linalg.distance
+array_cast    :: linalg.array_cast
+angle_between :: linalg.angle_between
 
 V2_ZERO  : V2 : {0, 0}
 V2_UP    : V2 : {0,-1}
 V2_RIGHT : V2 : {1, 0}
 V2_DOWN  : V2 : {0, 1}
 V2_LEFT  : V2 : {-1,0}
+
+signed_angle_between :: proc "contextless" (a, b: V2) -> f32 {
+	cross := a.x * b.y - a.y * b.x // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
+	// cross := a.y * b.x - a.x * b.y // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
+	// NOTE: I flipped the actual function I took from the source because I wanted positive to be counter clockwise
+	return math.atan2(cross, dot(a, b))
+}
 
 rotate_v2 :: proc "contextless" (v: V2, radians: f32) -> V2 {
 	cos := math.cos(radians)
@@ -207,7 +227,6 @@ line_spline_calculate :: proc(spline: Spline, f: f32) -> (result: V2, ended: boo
 	return
 }
 
-/* NOTE(06/02/25): Don't know what to do with these ones, I am not currently using them
 increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
 	switch spline.type {
 	case .catmull: result = catmull_spline_increment(spline, delta, speed)
@@ -228,6 +247,7 @@ catmull_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (re
 	spline.f += delta * speed
 	return
 }
+/* NOTE(06/02/25): Don't know what to do with these ones, I am not currently using them
 */
 
 catmull_spline_calculate_segment_length :: proc(control_points: []V3, u_int: int) -> (length: f32) { // Source: https://www.youtube.com/watch?v=DzjtU4WLYNs
@@ -326,10 +346,15 @@ lerp_i32 :: proc "contextless" (a, b: i32, t: f32) -> i32 {
 	return a + i32( f32(b - a) * t )
 }
 
-lerp_f32s :: proc "contextless" (a, b: $T, t: f32) -> T { // Can be used by anything that contains f32s (e.g.: `V2` and `f32`)
+lerp_f32 :: proc "contextless" (a, b: f32, t: f32) -> f32 {
 	return a + (b-a)*t
 }
-lerp :: proc{lerp_i32, lerp_f32s}
+
+lerp_generic :: proc "contextless" (a, b: $T, t: f32) -> T { // Can be used by anything that contains f32s (e.g.: `V2` and `f32`)
+	return a + (b-a)*t
+}
+
+lerp :: proc{lerp_i32, lerp_f32, lerp_generic}
 
 cubic_in :: proc "contextless" (t: f32) -> f32 {
 	return t * t * t

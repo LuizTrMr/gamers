@@ -92,7 +92,7 @@ chain :: proc(manager: ^Manager, v: Supported_Pointers, end: Supported_Values, s
 }
 
 update :: proc(manager: ^Manager, dt: f32) {
-	for &tween in manager.pool {
+	for &tween, handle in manager.pool {
 		if tween.state == .inactive_ready || tween.state == .inactive_waiting do continue
 
 		tween.t += dt

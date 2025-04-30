@@ -6,8 +6,20 @@ when RAYLIB {
 	Sound :: rl.Sound
 	Music :: rl.Music
 
+	init :: proc() {
+		rl.InitAudioDevice()
+	}
+
 	play_sound :: proc(sound: Sound) {
 		rl.PlaySound(sound)
+	}
+
+	sound_set_volume :: proc(sound: Sound, volume: f32) {
+		rl.SetSoundVolume(sound, volume)
+	}
+
+	sound_set_pitch :: proc(sound: Sound, pitch: f32) {
+		rl.SetSoundPitch(sound, pitch)
 	}
 
 	load_sound :: proc(path: string) -> Sound {

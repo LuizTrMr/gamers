@@ -49,6 +49,7 @@ volume_to_db :: proc "contextless" (volume: f32) -> f32 { // Source: https://www
 
 All_Pools :: enum {
 	ENEMY_EXPLOSION,
+	paint_splash,
 }
 
 Sound_Handle :: distinct u32
@@ -63,6 +64,13 @@ Sound_Manager :: struct {
 	cursor    : int,
 	pools     : [All_Pools]Sound_Range,
 	music     : Music,
+}
+
+get_from_pool :: proc(sm: ^Sound_Manager, which_pool: All_Pools) -> Sound {
+	range := sm.pools[which_pool]
+	end   := u32(range.handle) + range.count
+	sound := rand.choice( sm.all_sounds[range.handle:end] )
+	return sound
 }
 
 play_from_pool :: proc(sm: ^Sound_Manager, which_pool: All_Pools) {
