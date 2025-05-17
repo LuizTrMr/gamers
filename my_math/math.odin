@@ -25,12 +25,13 @@ cbrt :: proc "contextless" (f: f32) -> f32 {
 	return math.pow(f, 1/3)
 }
 
-normalize_f32 :: proc(start, end, value: f32) -> f32 {
-	res := (value - start) / (end - start)
-	assert( 0 <= res && res <= 1 )
-	return res
+norm :: proc "contextless" (start, end, value: f32) -> f32 {
+	return (value - start) / (end - start)
 }
 
+norm_clamped :: proc "contextless" (start, end, value: f32) -> f32 {
+	return clamp(norm(start, end, value), 0, 1)
+}
 
 //    /\
 //   ( /   @ @    ()   @V2 stuff!
@@ -45,7 +46,7 @@ V2            :: linalg.Vector2f32
 V3            :: linalg.Vector3f32
 V4            :: linalg.Vector4f32
 normalize_v2  :: linalg.vector_normalize0
-normalize     :: proc{normalize_f32, normalize_v2}
+normalize     :: proc{norm, normalize_v2}
 length        :: linalg.vector_length
 length2       :: linalg.vector_length2
 dot           :: linalg.vector_dot
