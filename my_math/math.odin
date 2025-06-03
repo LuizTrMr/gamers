@@ -54,16 +54,14 @@ distance      :: linalg.distance
 array_cast    :: linalg.array_cast
 angle_between :: linalg.angle_between
 
-V2_ZERO  : V2 : {0, 0}
+V2_ZERO  : V2 : 0
 V2_UP    : V2 : {0,-1}
 V2_RIGHT : V2 : {1, 0}
 V2_DOWN  : V2 : {0, 1}
 V2_LEFT  : V2 : {-1,0}
 
-signed_angle_between :: proc "contextless" (a, b: V2) -> f32 {
-	cross := a.x * b.y - a.y * b.x // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
-	// cross := a.y * b.x - a.x * b.y // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
-	// NOTE: I flipped the actual function I took from the source because I wanted positive to be counter clockwise
+signed_angle_between :: proc "contextless" (a, b: V2) -> f32 { // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
+	cross := a.x * b.y - a.y * b.x
 	return math.atan2(cross, dot(a, b))
 }
 
