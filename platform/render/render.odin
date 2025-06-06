@@ -6,9 +6,6 @@ import "core:fmt"
 
 import mm "../../my_math"
 
-RENDER :: #config(RENDER, "RAYLIB")
-#assert(RENDER == "RAYLIB" || RENDER == "WEBGPU" || RENDER == "CANVAS2D")
-
 Color :: mm.V4
 
 BLANK      :: Color{0.0  , 0.0  , 0.0  , 0.0}
@@ -44,6 +41,21 @@ rgb_to_color :: proc(rgb: [3]f32) -> (res: Color) {
 	return
 }
 
+color_to_u8s :: proc(color: Color) -> (res: [3]u8) {
+	res[0] = cast(u8)math.round(color[0]*255)
+	res[1] = cast(u8)math.round(color[1]*255)
+	res[2] = cast(u8)math.round(color[2]*255)
+	return
+}
+
+u8s_to_color :: proc(color: [3]u8, a: f32 = 1) -> (res: Color) {
+	res[0] = f32(color[0])/255
+	res[1] = f32(color[1])/255
+	res[2] = f32(color[2])/255
+	res.a  = a
+	return
+}
+
 color_to_rgb :: proc(color: Color) -> (res: [3]f32) {
 	for i in 0..<len(color)-1 {
 		assert(0 <= color[i], fmt.tprintfln("%v value = %v", i, color[i]))
@@ -70,6 +82,7 @@ u32_to_color :: proc "c" (u: u32, a: f32 = 1.0) -> (res: Color) { // NOTE(16/02/
 
 	return
 }
+color_from_u32 :: u32_to_color
 
 mix_color :: proc "c" (a, b: [$N]f32, t: f32) -> [N]f32 where N >= 0 && N <= 4 {
 	return a + (b-a)*t
@@ -95,21 +108,25 @@ Multi_Texture :: struct {
 	info   : struct {
 		rows : i32,
 		cols : i32,
-		count: i32,
 	},
 }
 
-multi_texture_cell_size :: #force_inline proc "c" (mt: Multi_Texture) -> mm.V2 {
-	result: mm.V2
-	result.x = f32(mt.texture.width  / mt.info.cols)
-	result.y = f32(mt.texture.height / mt.info.rows)
-	return result
+multi_texture_cell_size :: #force_inline proc "contextless" (mt: Multi_Texture) -> (res: mm.V2) {
+	res.x = f32(mt.texture.width  / mt.info.cols)
+	res.y = f32(mt.texture.height / mt.info.rows)
+	return
+}
+
+multi_texture_count :: #force_inline proc(mt: Multi_Texture, loc := #caller_location) -> i32 {
+	assert(mt.info.rows > 0, loc=loc)
+	assert(mt.info.cols > 0, loc=loc)
+	return mt.info.rows*mt.info.cols
 }
 
 texture_as_multi_texture :: proc(texture: Texture) -> Multi_Texture {
 	mt: Multi_Texture
 	mt.texture = texture
-	mt.info = {1,1,1}
+	mt.info = {1,1}
 	return mt
 }
 
@@ -244,4 +261,18 @@ color_to_hsv :: proc(col: Color) -> (res: HSV) {
 	res[1] = math.round(hsv[1] * 100)
 	res[2] = math.round(hsv[2] * 100)
 	return
+}
+
+Pivot :: enum {
+	top_left,
+	top_center,
+	top_right,
+
+	mid_left,
+	center,
+	mid_right,
+
+	bottom_left,
+	bottom_center,
+	bottom_right,
 }
