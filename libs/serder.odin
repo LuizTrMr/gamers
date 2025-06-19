@@ -12,23 +12,16 @@ import "core:log"
 
 // TODO: Use `(` and `)` to put metadata, e.g.: Union type, number of elements of slice
 // TODO: Better error message for: `panic: Could not find value: cannons_main for enum of type Texture_Id`
+// TODO: Add things that return allocator error
 
-ERROR :: "\033[31mERROR\033[0m"
-
-@(private="file")
-indent_pls :: #force_inline proc(sb: ^strings.Builder, indentation: int) {
-	for _ in 0..<indentation {
-		strings.write_byte(sb, ' ')
-	}
+Serializer_Config :: struct { // TODO: Add more stuff
+	float_precision: int,
+}
+default_serializer_config := Serializer_Config{
+	float_precision = 4,
 }
 
-@(private="file")
-should_indent :: #force_inline proc(sb: ^strings.Builder) -> bool {
-	return len(sb.buf) > 0 && sb.buf[len(sb.buf)-1] == '\n'
-}
-
-@(private="file")
-serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) {
+serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0, config: Serializer_Config = default_serializer_config) {
 	assert(a != nil, "a is `nil`")
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
@@ -55,7 +48,7 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 					strings.write_string(sb, ": ")
 
 					data := uintptr(a.data) + uintptr(i*info.elem_size)
-					serialize_to_string(any{rawptr(data), info.elem.id}, sb, indentation+4)
+					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
 				}
 			} else {
 				count := len(enum_type.values)
@@ -77,7 +70,7 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 						sum += int(enum_type.values[i]) - int(enum_type.values[i-1])
 					}
 					data := uintptr(a.data) + uintptr(sum*info.elem_size)
-					serialize_to_string(any{rawptr(data), info.elem.id}, sb, indentation+4)
+					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
 				}
 
 			}
@@ -142,7 +135,7 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 
 				for i in 0..<slice.len {
 					data := uintptr(slice.data) + uintptr(i*info.elem_size)
-					serialize_to_string(any{rawptr(data), info.elem.id}, sb, indentation+4)
+					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
 				}
 
 				indent_pls(sb, indentation)
@@ -157,7 +150,7 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 			for i in 0..<info.count {
 				data_address := uintptr(a.data) + uintptr(i*info.elem_size)
 				indent_pls(sb, indentation+4)
-				serialize_to_string(any{rawptr(data_address), info.elem.id}, sb, indentation+4)
+				serialize_to_builder(any{rawptr(data_address), info.elem.id}, sb, indentation+4)
 			}
 
 			indent_pls(sb, indentation)
@@ -195,22 +188,23 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 			reflect.write_type_builder(sb, info.variants[tag])
 			strings.write_byte(sb, ')')
 
-			serialize_to_string(any{a.data, id}, sb, indentation)
+			serialize_to_builder(any{a.data, id}, sb, indentation)
 
 		case reflect.Type_Info_Struct:
 			if should_indent(sb) do indent_pls(sb, indentation)
+			strings.write_string(sb, fmt.tprint(a.id))
 			strings.write_byte(sb, '{')
 			strings.write_byte(sb, '\n')
 
 			for field, i in reflect.struct_fields_zipped(a.id) {
-				if contains_tag(field.tag, "deprecated") do continue
+				if ok, err := contains_tag(field.tag, "deprecated"); ok && err == nil do continue
 				indent_pls(sb, indentation+4)
 				strings.write_string(sb, field.name)
 				strings.write_byte(sb, ':')
 				strings.write_byte(sb, ' ')
 
 				field_value := reflect.struct_field_value_by_name(a, field.name)
-				serialize_to_string(field_value, sb, indentation+4)
+				serialize_to_builder(field_value, sb, indentation+4)
 			}
 
 			indent_pls(sb, indentation)
@@ -255,34 +249,37 @@ serialize_to_string :: proc(a: any, sb: ^strings.Builder, indentation: int = 0) 
 
 		case reflect.Type_Info_Float:
 			a := reflect.any_core(a)
+			buf: [32]u8
+			str: string
 			switch f in a {
-				case f16: strings.write_f16(sb, f, 'f')
-				case f32: strings.write_f32(sb, f, 'f')
-				case f64: strings.write_f64(sb, f, 'f')
+				case f16: str = strconv.ftoa(buf[:], f64(f), 'f', config.float_precision, 16)
+				case f32: str = strconv.ftoa(buf[:], f64(f), 'f', config.float_precision, 32)
+				case f64: str = strconv.ftoa(buf[:],     f , 'f', config.float_precision, 64)
 				case: panic("AAAAAAAA")
 			}
+			strings.write_string(sb, str)
 
 	}
 
 	strings.write_byte(sb, '\n')
 }
 
-contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> bool {
-	tags := strings.split(string(struct_tags), " ", context.temp_allocator)
+contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> (ok: bool, err: mem.Allocator_Error) {
+	tags := strings.split(string(struct_tags), " ", context.temp_allocator) or_return
 	for t in tags {
-		if t == tag_name do return true
+		if t == tag_name do return true, nil
 	}
-	return false
+	return false, nil
 }
 
-serialize_to_file :: proc(a: any, path: string) {
+serialize_to_file :: proc(a: any, path: string, loc := #caller_location) -> mem.Allocator_Error {
 	assert(a != nil, "a is `nil`")
 
-	builder := strings.builder_make(context.temp_allocator)
-	serialize_to_string(a, &builder, 0)
+	builder := strings.builder_make(context.temp_allocator) or_return
+	serialize_to_builder(a, &builder, 0)
 	contents := strings.to_string(builder)
 
-	sb := strings.builder_make(context.temp_allocator)
+	sb := strings.builder_make(context.temp_allocator) or_return
 	strings.write_string(&sb, path)
 	strings.write_byte  (&sb, '.')
 	reflect.write_typeid(&sb, a.id)
@@ -290,7 +287,8 @@ serialize_to_file :: proc(a: any, path: string) {
 	full_path := strings.to_string(sb)
 
 	ok := os.write_entire_file(full_path, transmute([]byte) contents)
-	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file: %v", full_path))
+	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file: %v", full_path), loc)
+	return nil
 }
 
 deserialize_from_data :: proc(a: any, data: []byte, label: string, allocator: Maybe(mem.Allocator)) {
@@ -316,10 +314,9 @@ deserialize_from_data :: proc(a: any, data: []byte, label: string, allocator: Ma
 	assert(parser.curr_token.kind == .End)
 }
 
-deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocator)) {
+deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocator)) -> mem.Allocator_Error {
 	assert(a != nil, "a is `nil`")
-	a := a
-	a = reflect.any_base(a)
+	a := reflect.any_base(a)
 
 	ti := type_info_of(a.id)
 	if !reflect.is_pointer(ti) || ti.id == rawptr {
@@ -327,7 +324,7 @@ deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocat
 	}
 	underlying_id := ti.variant.(reflect.Type_Info_Pointer).elem.id
 
-	sb := strings.builder_make(context.temp_allocator)
+	sb := strings.builder_make(context.temp_allocator) or_return
 
 	strings.write_string(&sb, path)
 	strings.write_byte(&sb, '.')
@@ -350,6 +347,7 @@ deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocat
 	deserialize_from_string(data, &parser)
 	// log.infof("End   Deserializing type: %v", a.id)
 	assert(parser.curr_token.kind == .End)
+	return nil
 }
 
 @(private="file")
@@ -570,9 +568,13 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			}
 
 		case reflect.Type_Info_Struct:
-			expect(parser^, advance(parser).kind == .Curly_Bracket_Open)
-
 			token := advance(parser)
+			if token.kind == .Stream { // might be the struct's type
+				token = advance(parser)
+			}
+			expect(parser^, token.kind == .Curly_Bracket_Open)
+
+			token = advance(parser)
 			for token.kind != .Curly_Bracket_Close {
 				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
 				expect(parser^, parser.curr_token.kind == .Colon)
@@ -584,7 +586,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 					found = true
 					expect(parser^,  advance(parser).kind == .Colon )
-					if contains_tag(field.tag, "no_deserialize") {
+					if ok, err := contains_tag(field.tag, "no_deserialize"); ok && err == nil {
 						// log.warnf("Don't forget to deserialize the field %v for the %v type", field.name, a) TODO: Do this or nah?
 						token := advance(parser)
 						if token.kind == .Curly_Bracket_Open {
@@ -849,4 +851,18 @@ bytes_make :: proc(size, alignment: int, allocator: mem.Allocator, loc := #calle
 	b, berr := mem.alloc_bytes(size, alignment, allocator, loc)
 	assert(berr == nil)
 	return b
+}
+
+ERROR :: "\033[31mERROR\033[0m"
+
+@(private="file")
+indent_pls :: #force_inline proc(sb: ^strings.Builder, indentation: int) {
+	for _ in 0..<indentation {
+		strings.write_byte(sb, ' ')
+	}
+}
+
+@(private="file")
+should_indent :: #force_inline proc(sb: ^strings.Builder) -> bool {
+	return len(sb.buf) > 0 && sb.buf[len(sb.buf)-1] == '\n'
 }
