@@ -1,109 +1,174 @@
+// Pointer stable pool.
+// Free slots are found by linear search. This could be improved.
+// We store if a slot is allocated with a separate slice of active elements (as a slice of bools). This could be improved.
 package pool
 
 import "base:runtime"
 
 Static :: struct($T: typeid, $N: int) {
-	len: int,
-	items: [N]T,
+	items  : [N]T,
+	actives: [N]bool,
 }
 
-static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) {
-	assert(pool.len < N, loc=loc)
-	pool.items[pool.len] = item
-	pool.len += 1
+static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) -> int {
+	for active, handle in pool.actives {
+		if !active {
+			pool.actives[handle] = !pool.actives[handle]
+			pool.items[handle] = item
+			return handle
+		}
+	}
+	assert(false, "Trying to alloc more than the budget", loc=loc)
+	return -1
 }
 
-static_alloc_item :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (res:^T) {
-	assert(pool.len < N, loc=loc)
-	res  = &pool.items[pool.len]
-	res^ = {}
-	pool.len += 1
-	return
+static_alloc_item :: proc(pool: ^Static($T, $N), loc := #caller_location) -> ^T {
+	zero: T
+	handle := static_append(pool, zero, loc)
+	return &pool.items[handle]
 }
 
-static_unordered_remove :: proc(pool: ^Static($T, $N), index: int, loc := #caller_location) {
-	assert(index < pool.len, loc=loc)
-	pool.items[index], pool.items[pool.len-1] = pool.items[pool.len-1], pool.items[index]
-	pool.len -= 1
+static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #caller_location) {
+	assert(pool.actives[handle], loc=loc)
+	pool.actives[handle] = !pool.actives[handle]
+}
+
+static_batch_remove :: proc(pool: ^Static($T, $N), handles: []int, loc := #caller_location) {
+	for handle in handles {
+		remove(pool, handle)
+	}
 }
 
 static_clear :: proc(pool: ^Static($T, $N)) {
-	pool.len = 0
+	pool.items   = {}
+	pool.actives = {}
 }
 
-static_slice :: proc(pool: ^Static($T, $N)) -> []T {
-	return pool.items[:pool.len]
+Iterator :: struct {
+	index: int,
 }
 
-static_slice_inactives :: proc(pool: ^Static($T, $N)) -> []T {
-	return pool.items[pool.len:]
-}
-
-static_batch_unordered_remove :: proc(pool: ^Static($T, $N), to_remove: []int) {
-	#reverse for index_to_remove in to_remove {
-		static_unordered_remove(pool, index_to_remove)
+static_iterate :: proc(it: ^Iterator, pool: Static($T, $N)) -> (v:T, handle:int, more:bool) {
+	for it.index < N && !pool.actives[it.index] {
+		it.index += 1
 	}
+	if it.index >= N {
+		it.index = 0 // automatically restart
+		return
+	}
+	v = pool.items[it.index]
+	handle = it.index
+	more = true
+	it.index += 1
+	return
+}
+
+static_iterate_by_ptr :: proc(it: ^Iterator, pool: ^Static($T, $N)) -> (v:^T, handle:int, more:bool) {
+	for it.index < N && !pool.actives[it.index] {
+		it.index += 1
+	}
+	if it.index == N {
+		it.index = 0 // automatically restart
+		return
+	}
+	v = &pool.items[it.index]
+	handle = it.index
+	more = true
+	it.index += 1
+	return
 }
 
 Dynamic :: struct($T: typeid) {
-	len: int,
-	items: []T,
+	items  : []T,
+	actives: []bool,
+	allocator: runtime.Allocator,
 }
 
-dynamic_allocate :: proc(pool: ^Dynamic($T), n: int, allocator: runtime.Allocator) -> (err: runtime.Allocator_Error) {
-	pool.items, err = make_slice([]T, n, allocator)
-	pool.len = 0
-	return
+allocate :: proc(pool: ^Dynamic($T), n: int, allocator: runtime.Allocator, loc := #caller_location) {
+	pool.allocator = allocator
+	err: runtime.Allocator_Error
+	pool.items, err = make_slice([]T  , n, pool.allocator)
+	assert(err == nil, loc=loc)
+	pool.actives, err = make_slice([]bool, n, pool.allocator)
+	assert(err == nil, loc=loc)
 }
 
-free :: proc(pool: ^Dynamic($T)) {
-	free(pool.items)
+dynamic_free :: proc(pool: ^Dynamic($T), loc := #caller_location) {
+	err: runtime.Allocator_Error
+	err = delete_slice(pool.items  , pool.allocator)
+	assert(err == nil, loc=loc)
+	err = delete_slice(pool.actives, pool.allocator)
+	assert(err == nil, loc=loc)
 }
 
-dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) {
-	assert(pool.len < len(pool.items), loc=loc)
-	pool.items[pool.len] = item
-	pool.len += 1
+dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) -> int {
+	for active, handle in pool.actives {
+		if !active {
+			pool.actives[handle] = !pool.actives[handle]
+			pool.items[handle] = item
+			return handle
+		}
+	}
+	assert(false, "Trying to alloc more than the budget", loc=loc)
+	return -1
 }
 
-dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> (res:^T) {
-	assert(pool.len < len(pool.items), loc=loc)
-	res  = &pool.items[pool.len]
-	res^ = {}
-	pool.len += 1
-	return
+dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> ^T {
+	zero: T
+	handle := dynamic_append(pool, zero, loc)
+	return &pool.items[handle]
 }
 
-dynamic_unordered_remove :: proc(pool: ^Dynamic($T), index: int, loc := #caller_location) {
-	assert(index < pool.len, loc=loc)
-	pool.items[index], pool.items[pool.len-1] = pool.items[pool.len-1], pool.items[index]
-	pool.len -= 1
+dynamic_remove :: proc(pool: ^Dynamic($T), #any_int handle: int, loc := #caller_location) {
+	assert(pool.actives[handle], loc=loc)
+	pool.actives[handle] = !pool.actives[handle]
 }
 
-dynamic_clear :: proc(pool: ^Dynamic($T)) {
-	pool.len = 0
-}
-
-dynamic_slice :: proc(pool: ^Dynamic($T)) -> []T {
-	return pool.items[:pool.len]
-}
-
-dynamic_slice_inactives :: proc(pool: ^Dynamic($T)) -> []T {
-	return pool.items[pool.len:]
-}
-
-dynamic_batch_unordered_remove :: proc(pool: ^Dynamic($T), to_remove: []int) {
-	#reverse for index_to_remove in to_remove {
-		dynamic_unordered_remove(pool, index_to_remove)
+dynamic_batch_remove :: proc(pool: ^Dynamic($T), handles: []int, loc := #caller_location) {
+	for handle in handles {
+		remove(pool, handle)
 	}
 }
 
-append           :: proc{static_append, dynamic_append, soa_static_append, soa_dynamic_append}
-alloc_item       :: proc{static_alloc_item, dynamic_alloc_item, soa_static_alloc_item, soa_dynamic_alloc_item}
-unordered_remove :: proc{static_unordered_remove, dynamic_unordered_remove, soa_static_unordered_remove, soa_dynamic_unordered_remove}
-clear            :: proc{static_clear, dynamic_clear, soa_static_clear, soa_dynamic_clear}
-slice            :: proc{static_slice, dynamic_slice, soa_static_slice, soa_dynamic_slice}
-slice_inactives  :: proc{static_slice_inactives, dynamic_slice_inactives, soa_static_slice_inactives, soa_dynamic_slice_inactives}
-batch_unordered_remove  :: proc{static_batch_unordered_remove, dynamic_batch_unordered_remove, soa_static_batch_unordered_remove, soa_dynamic_batch_unordered_remove}
+dynamic_clear :: proc(pool: ^Dynamic($T)) {
+	pool.items   = {}
+	pool.actives = {}
+}
 
-allocate :: proc{dynamic_allocate, soa_dynamic_allocate}
+dynamic_iterate :: proc(it: ^Iterator, pool: Dynamic($T)) -> (v:T, handle:int, more:bool) {
+	for it.index < len(pool.items) && !pool.actives[it.index] {
+		it.index += 1
+	}
+	if it.index >= len(pool.items) {
+		it.index = 0 // automatically restart
+		return
+	}
+	v = pool.items[it.index]
+	handle = it.index
+	more = true
+	it.index += 1
+	return
+}
+
+dynamic_iterate_by_ptr :: proc(it: ^Iterator, pool: ^Dynamic($T)) -> (v:^T, handle:int, more:bool) {
+	for it.index < len(pool.items) && !pool.actives[it.index] {
+		it.index += 1
+	}
+	if it.index == len(pool.items) {
+		it.index = 0 // automatically restart
+		return
+	}
+	v = &pool.items[it.index]
+	handle = it.index
+	more = true
+	it.index += 1
+	return
+}
+
+append         :: proc{static_append        , dynamic_append}
+alloc_item     :: proc{static_alloc_item    , dynamic_alloc_item}
+remove         :: proc{static_remove        , dynamic_remove}
+batch_remove   :: proc{static_batch_remove  , dynamic_batch_remove}
+clear          :: proc{static_clear         , dynamic_clear}
+iterate        :: proc{static_iterate       , dynamic_iterate}
+iterate_by_ptr :: proc{static_iterate_by_ptr, dynamic_iterate_by_ptr}
