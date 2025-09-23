@@ -1,4 +1,4 @@
-// A list tightly packed in memory, usable to process non ordered data.
+// A list tightly packed in memory, useful to process non ordered data.
 // You can only delete elements by batch deleting a slice of them.
 package batch
 
