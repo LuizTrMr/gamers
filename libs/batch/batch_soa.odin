@@ -35,14 +35,14 @@ soa_static_slice_inactives :: proc(batch: ^SOA_Static($T, $N)) -> []T {
 }
 
 @(private="file")
-soa_static_unordered_remove :: proc(batch: ^SOA_Static($T, $N), index: int, loc := #caller_location) {
+_soa_static_unordered_remove :: proc(batch: ^SOA_Static($T, $N), index: int, loc := #caller_location) {
 	assert(index < batch.len, loc=loc)
 	batch.items[index], batch.items[batch.len-1] = batch.items[batch.len-1], batch.items[index]
 	batch.len -= 1
 }
 soa_static_unordered_remove :: proc(batch: ^SOA_Static($T, $N), to_remove: []int) {
 	#reverse for index_to_remove in to_remove {
-		_static_unordered_remove(batch, index_to_remove)
+		_soa_static_unordered_remove(batch, index_to_remove)
 	}
 }
 
@@ -52,7 +52,7 @@ SOA_Dynamic :: struct($T: typeid) {
 	allocator: runtime.Allocator,
 }
 
-soa_dynamic_allocate :: proc(batch: ^SOA_Dynamic($T), n: int, allocator: runtime.Allocator, loc := #caller_location) -> (err: runtime.Allocator_Error) {
+soa_dynamic_allocate :: proc(batch: ^SOA_Dynamic($T), #any_int n: int, allocator: runtime.Allocator, loc := #caller_location) -> (err: runtime.Allocator_Error) {
 	batch.allocator = allocator
 	batch.items, err = make_soa_slice(#soa[]T, n, batch.allocator, loc=loc)
 	batch.len = 0

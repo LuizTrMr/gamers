@@ -6,7 +6,8 @@ import "core:fmt"
 
 import mm "../../my_math"
 
-Color :: mm.V4
+Color  :: mm.V4
+Color3 :: mm.V3
 
 BLANK      :: Color{0.0  , 0.0  , 0.0  , 0.0}
 WHITE      :: Color{1.0  , 1.0  , 1.0  , 1.0}
@@ -21,6 +22,7 @@ BLUE       :: Color{0.0  , 0.474, 0.945, 1.0}
 RED        :: Color{0.901, 0.160, 0.215, 1.0}
 PURPLE     :: Color{0.501, 0    , 0.501, 1.0}
 ORANGE     :: Color{1.0  , 0.498, 0.313, 1.0}
+BROWN      :: Color{0.550, 0.270, 0.070, 1.0}
 EDITOR     :: Color{0.561, 0.788, 0.949, 1.0}
 
 // Color Harmonies
@@ -83,6 +85,28 @@ u32_to_color :: proc "c" (u: u32, a: f32 = 1.0) -> (res: Color) { // NOTE(16/02/
 	return
 }
 color_from_u32 :: u32_to_color
+color_from_hex :: color_from_u32
+color_from_8bit :: proc(col: [4]u8) -> (res:Color) {
+	res.r = f32(col.r)/255
+	res.g = f32(col.g)/255
+	res.b = f32(col.b)/255
+	res.a = f32(col.a)/255
+	return 
+}
+
+color_to_8bit :: proc(col: Color) -> (res:[4]u8) {
+	res.r = u8(col.r*255+0.5)
+	res.g = u8(col.g*255+0.5)
+	res.b = u8(col.b*255+0.5)
+	res.a = u8(col.a*255+0.5)
+	return 
+}
+
+color_alpha :: proc(col: Color, a: f32) -> (res:Color) {
+	res = col
+	res.a = a
+	return
+}
 
 mix_color :: proc "c" (a, b: [$N]f32, t: f32) -> [N]f32 where N >= 0 && N <= 4 {
 	return a + (b-a)*t
@@ -111,6 +135,12 @@ Multi_Texture :: struct {
 	},
 }
 
+multi_texture_get_size :: proc(multi_texture: Multi_Texture) -> (size:mm.V2) {
+	size.x = f32(multi_texture.texture.width ) / f32(multi_texture.info.cols)
+	size.y = f32(multi_texture.texture.height) / f32(multi_texture.info.rows)
+	return
+}
+
 multi_texture_cell_size :: #force_inline proc "contextless" (mt: Multi_Texture) -> (res: mm.V2) {
 	res.x = f32(mt.texture.width  / mt.info.cols)
 	res.y = f32(mt.texture.height / mt.info.rows)
@@ -129,6 +159,7 @@ texture_as_multi_texture :: proc(texture: Texture) -> Multi_Texture {
 	mt.info = {1,1}
 	return mt
 }
+multi_texture_from_texture :: texture_as_multi_texture
 
 // Color Picker: https://www.tawansunflower.com/colorpicker
 OkLab :: struct {
@@ -244,6 +275,7 @@ hsv_to_rgb :: proc(h, s, v: f32) -> [3]f32 {
     return {r * 255, g * 255, b * 255}
 }
 
+color_from_hsv :: hsv_to_color
 hsv_to_color :: proc(col: HSV) -> Color {
 	h := col[0] / 360
 	s := col[1] / 100
@@ -253,6 +285,7 @@ hsv_to_color :: proc(col: HSV) -> Color {
 	return rgb_to_color(rgb)
 }
 
+hsv_from_color :: color_to_hsv
 color_to_hsv :: proc(col: Color) -> (res: HSV) {
 	rgb := color_to_rgb(col)
 	hsv := rgb_to_hsv(expand_values(rgb))
@@ -261,6 +294,22 @@ color_to_hsv :: proc(col: Color) -> (res: HSV) {
 	res[1] = math.round(hsv[1] * 100)
 	res[2] = math.round(hsv[2] * 100)
 	return
+}
+
+draw_rectangle_f32 :: proc(x, y, w, h: f32, color: Color) {
+	_draw_rectangle(x,y,w,h,color)
+}
+draw_rectangle_v2 :: proc(pos: [2]f32, size: [2]f32, color: Color) {
+	_draw_rectangle(pos.x,pos.y,size.x,size.y,color)
+}
+draw_rectangle :: proc{draw_rectangle_f32,draw_rectangle_v2}
+
+draw_line :: _draw_line
+
+draw_lines :: proc(points: []mm.V2, thick: f32, color: Color) {
+	for index in 0..<len(points)-1 {
+		_draw_line(points[index], points[index+1], thick, color)
+	}
 }
 
 Pivot :: enum {
@@ -275,4 +324,136 @@ Pivot :: enum {
 	bottom_left,
 	bottom_center,
 	bottom_right,
+}
+
+Camera2D :: struct {
+	position: mm.V2,
+	zoom    : f32,
+	target  : mm.V2,
+}
+
+camera2d_begin :: #force_inline proc(camera: Camera2D) {
+	assert(camera.zoom != 0)
+	_camera2d_begin(camera)
+}
+
+camera2d_end :: #force_inline proc() {
+	_camera2d_end()
+}
+
+camera2d_make :: proc(target: mm.V2 = 0, position: mm.V2 = 0) -> (res:Camera2D) {
+	res.zoom   = 1
+	res.target = target
+	res.position = position
+	return
+}
+
+camera2d_screen_to_world_position :: proc(mouse_position: [2]f32, camera: Camera2D) -> mm.V2 {
+	return _camera2d_screen_to_world_position(mouse_position, camera)
+}
+
+@(private)
+there_is_a_buffer_target_in_use: bool
+@(private)
+current_buffer_target_in_use: Buffer_Target
+
+Uniform_Datatype :: enum i32 {
+	float,
+	vec2,
+	vec3,
+	vec4,
+	int,
+	ivec2,
+	ivec3,
+	ivec4,
+	sampler2d,
+	matrix3,
+	matrix4,
+}
+
+@(private)
+there_is_a_shader_in_use: bool
+@(private)
+current_shader_in_use: Shader
+
+buffer_target_load :: proc(width, height: i32) -> Buffer_Target {
+	return _buffer_target_load(width, height)
+}
+buffer_target_unload :: proc(target: Buffer_Target) {
+	_buffer_target_unload(target)
+}
+
+buffer_target_begin :: proc(target: Buffer_Target, loc := #caller_location) {
+	assert(!there_is_a_buffer_target_in_use, loc=loc)
+	current_buffer_target_in_use = target
+	there_is_a_buffer_target_in_use = true
+	_buffer_target_begin(current_buffer_target_in_use)
+}
+
+buffer_target_end :: proc(loc := #caller_location) -> (res:Texture) {
+	assert(there_is_a_buffer_target_in_use, loc=loc)
+	there_is_a_buffer_target_in_use = false
+	res = current_buffer_target_in_use.texture
+	_buffer_target_end()
+	current_buffer_target_in_use = {}
+	return 
+}
+
+shader_begin :: proc(shader: Shader) {
+	assert(!there_is_a_shader_in_use)
+	current_shader_in_use = shader
+	there_is_a_shader_in_use = true
+	_shader_use_begin(shader)
+}
+
+shader_end :: proc() {
+	assert(there_is_a_shader_in_use)
+	there_is_a_shader_in_use = false
+	current_shader_in_use = {}
+	_shader_use_end()
+}
+
+shader_set_uniform :: proc(uniform_name: string, datatype: Uniform_Datatype, data: rawptr, loc := #caller_location) {
+	_shader_set_uniform(current_shader_in_use, uniform_name, datatype, data, loc)
+}
+
+shader_set_uniform_array :: proc(uniform_name: string, datatype: Uniform_Datatype, data: rawptr, count: i32, loc := #caller_location) {
+	_shader_set_uniform_array(current_shader_in_use, uniform_name, datatype, data, count, loc)
+} 
+
+shader_set_uniform_texture :: proc(uniform_name: string, texture: Texture, loc := #caller_location) {
+	_shader_set_uniform_texture(current_shader_in_use, uniform_name, texture, loc)
+} 
+
+clear :: proc(options: bit_set[Clear_Option], color: Color) {
+	_clear(options, color)
+}
+Clear_Option :: enum {
+	Color,
+	Depth,
+	Stencil,
+}
+
+Image :: struct {
+	data  : rawptr,
+	width : i32,
+	height: i32,
+	format: Pixel_Data_Format,
+}
+Pixel_Data_Format :: enum {
+	RGBA8,
+	RGB8,
+	R8,
+}
+
+load_image_from_texture :: proc(texture: Texture) -> Image {
+	return _load_image_from_texture(texture)
+}
+
+Option :: enum {
+	enabled,
+	disabled,
+}
+set_mouse_cursor :: proc(opt: Option) {
+	_set_mouse_cursor(opt)
 }

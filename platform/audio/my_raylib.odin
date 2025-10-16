@@ -1,8 +1,9 @@
+#+build !js
 package platform_audio
 
 import rl "vendor:raylib"
 
-when RAYLIB {
+when PLATFORM == "RAYLIB" {
 	Sound :: rl.Sound
 	Music :: rl.Music
 

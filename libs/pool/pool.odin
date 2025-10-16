@@ -13,7 +13,7 @@ Static :: struct($T: typeid, $N: int) {
 static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) -> int {
 	for active, handle in pool.actives {
 		if !active {
-			pool.actives[handle] = !pool.actives[handle]
+			pool.actives[handle] = true
 			pool.items[handle] = item
 			return handle
 		}
@@ -22,10 +22,10 @@ static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) -
 	return -1
 }
 
-static_alloc_item :: proc(pool: ^Static($T, $N), loc := #caller_location) -> ^T {
+static_alloc_item :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (^T, int) {
 	zero: T
 	handle := static_append(pool, zero, loc)
-	return &pool.items[handle]
+	return &pool.items[handle], handle
 }
 
 static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #caller_location) {
@@ -113,10 +113,10 @@ dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) -> 
 	return -1
 }
 
-dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> ^T {
+dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> (^T, int) {
 	zero: T
 	handle := dynamic_append(pool, zero, loc)
-	return &pool.items[handle]
+	return &pool.items[handle], handle
 }
 
 dynamic_remove :: proc(pool: ^Dynamic($T), #any_int handle: int, loc := #caller_location) {

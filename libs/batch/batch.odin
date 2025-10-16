@@ -53,7 +53,7 @@ Dynamic :: struct($T: typeid) {
 	allocator: runtime.Allocator,
 }
 
-dynamic_allocate :: proc(batch: ^Dynamic($T), n: int, allocator: runtime.Allocator, loc := #caller_location) -> (err: runtime.Allocator_Error) {
+dynamic_allocate :: proc(batch: ^Dynamic($T), #any_int n: int, allocator: runtime.Allocator, loc := #caller_location) -> (err: runtime.Allocator_Error) {
 	batch.allocator  = allocator
 	batch.items, err = make_slice([]T, n, batch.allocator, loc=loc)
 	batch.len = 0

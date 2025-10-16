@@ -3,7 +3,7 @@ package platform_render
 import "base:intrinsics"
 import "core:strings"
 
-import "gamers:libs"
+import "shared:gamers/libs"
 
 debug_show_struct :: proc(s: $T, start_pos: [2]f32, font_size: i32 = 14, background_color: Color = RED, font_color: Color = WHITE)
 where intrinsics.type_is_struct(T) {

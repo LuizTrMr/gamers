@@ -25,9 +25,10 @@ cbrt :: proc "contextless" (f: f32) -> f32 {
 	return math.pow(f, 1/3)
 }
 
-norm :: proc "contextless" (start, end, value: f32) -> f32 {
+normalize_f32 :: proc "contextless" (start, end, value: f32) -> f32 {
 	return (value - start) / (end - start)
 }
+norm :: normalize_f32
 
 norm_clamped :: proc "contextless" (start, end, value: f32) -> f32 {
 	return clamp(norm(start, end, value), 0, 1)
@@ -42,16 +43,21 @@ norm_clamped :: proc "contextless" (start, end, value: f32) -> f32 {
 //    / /-`---'-\ \
 //     /         \
 
-V2            :: linalg.Vector2f32
-V3            :: linalg.Vector3f32
-V4            :: linalg.Vector4f32
-normalize_v2  :: linalg.vector_normalize0
-normalize     :: proc{norm, normalize_v2}
+V2            :: [2]f32
+V3            :: [3]f32
+V4            :: [4]f32
+normalize_v2 :: #force_inline proc "contextless" (v: V2) -> V2 {
+	return linalg.vector_normalize0(v)
+}
+normalize     :: proc{normalize_f32, normalize_v2}
 length        :: linalg.vector_length
 length2       :: linalg.vector_length2
 dot           :: linalg.vector_dot
 distance      :: linalg.distance
 array_cast    :: linalg.array_cast
+smallest_angle_between :: linalg.angle_between
+
+@(deprecated="`angle_between` is deprecated, use `smallest_angle_between` instead")
 angle_between :: linalg.angle_between
 
 V2_ZERO  : V2 : 0
@@ -59,6 +65,12 @@ V2_UP    : V2 : {0,-1}
 V2_RIGHT : V2 : {1, 0}
 V2_DOWN  : V2 : {0, 1}
 V2_LEFT  : V2 : {-1,0}
+
+clamp_v2 :: proc "contextless" (v, minimum, maximum: V2) -> (res:V2) {
+	res.x = clamp(v.x, minimum.x, maximum.x)
+	res.y = clamp(v.y, minimum.y, maximum.y)
+	return
+}
 
 signed_angle_between :: proc "contextless" (a, b: V2) -> f32 { // Source: https://github.com/godotengine/godot/blob/4b36c0491edcecb1f800bc59ef2995921999c3c0/core/math/vector2.cpp#L92
 	cross := a.x * b.y - a.y * b.x
@@ -74,18 +86,27 @@ rotate_v2 :: proc "contextless" (v: V2, radians: f32) -> V2 {
 	}
 }
 
+angle_from_direction :: proc "contextless" (dir: V2) -> (res:f32) {
+	dir := normalize(dir)
+	angle_between := smallest_angle_between(V2_RIGHT, dir)
+	if dir.y < 0 && dir.y != -0 {
+		res = math.TAU - angle_between
+	}
+	else {res = angle_between}
+	return
+}
+
 direction_from_angle :: proc "contextless" (radians: f32) -> V2 {
 	return { math.cos(radians), math.sin(radians) }
 }
 
-is_near_f32 :: proc "contextless" (a, b: f32, distance: f32) -> bool {
-	return a - distance <= b && b <= a + distance
+is_near_f32 :: proc "contextless" (fixed, to_test: f32, distance: f32) -> bool {
+	return fixed - distance <= to_test && to_test <= fixed + distance
 }
 
 is_near_v2 :: proc "contextless" (a, b: V2, radius: f32) -> bool {
 	return length2(b-a) <= radius*radius
 }
-
 is_near :: proc{is_near_f32, is_near_v2}
 
 sample_point_inside_rect :: proc(bound_a, bound_b: V2) -> (result: V2) {
@@ -123,6 +144,12 @@ line_line_intersection_point :: proc(p1, p2, p3, p4: V2) -> (V2, bool) { // Sour
 	return V2{}, false
 }
 
+line_line_intersection :: proc(p1, p2, p3, p4: V2) -> bool {
+	denom := (p4.y-p3.y)*(p2.x-p1.x) - (p4.x-p3.x)*(p2.y-p1.y)
+	ua := ((p4.x-p3.x)*(p1.y-p3.y) - (p4.y-p3.y)*(p1.x-p3.x)) / denom
+	ub := ((p2.x-p1.x)*(p1.y-p3.y) - (p2.y-p1.y)*(p1.x-p3.x)) / denom
+	return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1
+}
 
 // ───▄▄─▄████▄▐▄▄▄▌
 // ──▐──████▀███▄█▄▌   @Splines!
@@ -246,8 +273,6 @@ catmull_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (re
 	spline.f += delta * speed
 	return
 }
-/* NOTE(06/02/25): Don't know what to do with these ones, I am not currently using them
-*/
 
 catmull_spline_calculate_segment_length :: proc(control_points: []V3, u_int: int) -> (length: f32) { // Source: https://www.youtube.com/watch?v=DzjtU4WLYNs
 	step: f32: 0.005
@@ -294,7 +319,6 @@ line_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
 	result = lerp(control_points[u_int], control_points[u_int+1], t).xy
 	return
 }
-
 
 @(require_results)
 get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32) {
@@ -349,11 +373,15 @@ lerp_f32 :: proc "contextless" (a, b: f32, t: f32) -> f32 {
 	return a + (b-a)*t
 }
 
-lerp_generic :: proc "contextless" (a, b: $T, t: f32) -> T { // Can be used by anything that contains f32s (e.g.: `V2` and `f32`)
+lerp_v2 :: proc "contextless" (a, b: V2, t: f32) -> V2 {
 	return a + (b-a)*t
 }
 
-lerp :: proc{lerp_i32, lerp_f32, lerp_generic}
+lerp_generic :: proc "contextless" (a, b: $T, t: f32) -> T {
+	return a + (b-a)*t
+}
+
+lerp :: proc{lerp_i32, lerp_f32, lerp_v2, lerp_generic}
 
 cubic_in :: proc "contextless" (t: f32) -> f32 {
 	return t * t * t
@@ -370,6 +398,37 @@ cubic_in_out :: proc "contextless" (t: f32) -> f32 {
 
 cubic_out_in :: proc "contextless" (t: f32) -> f32 {
 	return cubic_out(t) if t < 0.5 else cubic_in(t)
+}
+
+// TODO: Test these
+back_in :: proc "contextless" (t: f32) -> f32 {
+	c1 :: 1.70158
+	c3 :: c1 + 1
+	return c3 * t * t * t - c1 * t * t
+}
+
+back_out :: proc "contextless" (t: f32) -> f32 {
+	c1 :: 1.70158
+	c3 :: c1 + 1
+
+	return 1 + c3 * math.pow_f32(t - 1, 3) + c1 * math.pow_f32(t - 1, 2)
+}
+
+back_in_out :: proc "contextless" (t: f32) -> (res:f32) {
+	c1 :: 1.70158
+	c2 :: c1 * 1.525
+
+	if t < 0.5 {
+		res = (math.pow_f32(2 * t, 2) * ((c2 + 1) * 2 * t - c2)) / 2 
+	}
+	else {
+		res = (math.pow_f32(2 * t - 2, 2) * ((c2 + 1) * (t * 2 - 2) + c2) + 2) / 2
+	}
+	return
+}
+
+back_out_in :: proc "contextless" (t: f32) -> f32 {
+	return back_out(t) if t < 0.5 else back_in(t)
 }
 
 // @Parametric functions
@@ -414,6 +473,43 @@ Bounds :: struct {
 	end  : V2,
 }
 
+bounds_from_start_and_size :: proc(start, size: V2) -> (res:Bounds) {
+	res.start = start
+	res.end   = start+size
+	return
+}
+
+bounds_size :: proc "contextless" (b: Bounds) -> V2 {
+	return b.end-b.start
+}
+
+clockwise_points_from_bounds :: proc(bounds: Bounds) -> (p0, p1, p2, p3: V2) {
+	size := bounds_size(bounds)
+	p0 = bounds.start
+	p1 = p0+{size.x,0}
+	p2 = p1+{0,size.y}
+	p3 = p2-{size.x,0}
+	return
+}
+
+is_point_inside_rect :: proc "contextless" (p: V2, start: V2, size: V2) -> bool {
+	return p.x >= start.x && p.x <= start.x+size.x && p.y >= start.y && p.y <= start.y+size.y
+}
+
 is_point_inside_bounds :: proc "contextless" (p: V2, b: Bounds) -> bool {
-	return p.x >= b.start.x && p.x <= b.end.x && p.y >= b.start.y && p.y <= b.end.y
+	return is_point_inside_rect(p, b.start, bounds_size(b))
+}
+
+is_point_inside_polygon :: proc(points: []V2, point: V2, raycast: V2) -> bool {
+	if len(points) < 3 do return false
+	raycast_start := point
+	raycast_end   := point + raycast
+	count: int
+	for i in 0..<len(points)-1 {
+		p0 := points[i]
+		p1 := points[i+1]
+		count += cast(int)line_line_intersection(p0, p1, raycast_start, raycast_end)
+	}
+	count += cast(int)line_line_intersection(points[len(points)-1], points[0], raycast_start, raycast_end)
+	return count % 2 != 0
 }

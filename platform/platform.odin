@@ -1,5 +1,7 @@
 package platform
 
+import "core:os"
+
 PLATFORM :: #config(PLATFORM, "RAYLIB")
 #assert(PLATFORM == "RAYLIB" || PLATFORM == "WEB")
 
@@ -10,4 +12,16 @@ read_entire_file :: proc(name: string, allocator := context.allocator, loc := #c
 
 write_entire_file :: proc(name: string, data: []byte, truncate := true) -> (success: bool) {
 	return _write_entire_file(name, data, truncate)
+}
+
+set_target_fps :: proc(fps: i32) {
+	_set_target_fps(fps)
+}
+
+get_frame_duration :: proc() -> f32 {
+	return _get_frame_duration()
+}
+
+open :: proc(path: string) -> (os.Handle, os.Error) {
+	return _open_simple(path)
 }

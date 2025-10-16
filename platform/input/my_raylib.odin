@@ -18,12 +18,20 @@ when PLATFORM == "RAYLIB" {
 		return rl.GetMousePosition()
 	}
 
+	set_mouse_position :: proc "contextless" (pos: [2]f32) {
+		rl.SetMousePosition(i32(pos.x+0.5),i32(pos.y+0.5))
+	}
+
 	is_mouse_button_pressed :: proc "contextless" (button: Mouse_Button) -> bool {
 		return rl.IsMouseButtonPressed(cast(rl.MouseButton) button)
 	}
 
 	is_mouse_button_down :: proc "contextless" (button: Mouse_Button) -> bool {
 		return rl.IsMouseButtonDown(cast(rl.MouseButton) button)
+	}
+
+	is_mouse_button_released :: proc "contextless" (button: Mouse_Button) -> bool {
+		return rl.IsMouseButtonReleased(cast(rl.MouseButton) button)
 	}
 
 	// Stubs

@@ -3,7 +3,8 @@ package platform_audio
 import "core:math"
 import "core:math/rand"
 
-RAYLIB :: true
+PLATFORM :: #config(PLATFORM, "RAYLIB")
+#assert(PLATFORM == "RAYLIB" || PLATFORM == "WEB")
 
 /* NOTE: First Implementation (would allocate only the number of sounds needed for a specific level)
 All_Pools :: enum {
@@ -48,7 +49,7 @@ volume_to_db :: proc "contextless" (volume: f32) -> f32 { // Source: https://www
 }
 
 All_Pools :: enum {
-	ENEMY_EXPLOSION,
+	enemy_explosion,
 	paint_splash,
 }
 

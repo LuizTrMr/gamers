@@ -1,7 +1,9 @@
 package gamers_libs
 
 import "base:intrinsics"
+import "base:runtime"
 
+import "core:math/bits"
 import "core:fmt"
 import "core:mem"
 import "core:strings"
@@ -10,14 +12,12 @@ import "core:reflect"
 import "core:strconv"
 import "core:log"
 
-// TODO: Use `(` and `)` to put metadata, e.g.: Union type, number of elements of slice
-// TODO: Better error message for: `panic: Could not find value: cannons_main for enum of type Texture_Id`
 // TODO: Add things that return allocator error
 
 Serializer_Config :: struct { // TODO: Add more stuff
 	float_precision: int,
 }
-default_serializer_config := Serializer_Config{
+default_serializer_config :: Serializer_Config{
 	float_precision = 4,
 }
 
@@ -25,11 +25,10 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 	assert(a != nil, "a is `nil`")
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
+	if should_indent(sb) do indent_pls(sb, indentation)
 	#partial switch info in ti.variant {
 		case: panic( fmt.tprintf("Not yet implemented: %v\n", info) )
 		case reflect.Type_Info_Enumerated_Array:
-			if should_indent(sb) do indent_pls(sb, indentation)
-
 			index_ti  := reflect.type_info_base(info.index)
 			enum_type := index_ti.variant.(reflect.Type_Info_Enum)
 
@@ -78,13 +77,29 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 			indent_pls(sb, indentation)
 			strings.write_byte(sb, '}')
 
-		case reflect.Type_Info_Bit_Set: // NOTE: Not handling the possibility of the bit_set endianess being different from the machine
-			if should_indent(sb) do indent_pls(sb, indentation)
+		case reflect.Type_Info_Bit_Set:
+			is_bit_set_different_endian_to_platform :: proc(ti: ^runtime.Type_Info) -> bool {
+				if ti == nil {
+					return false
+				}
+				t := runtime.type_info_base(ti)
+				#partial switch info in t.variant {
+					case runtime.Type_Info_Integer:
+					switch info.endianness {
+						case .Platform: return false
+						case .Little:   return ODIN_ENDIAN != .Little
+						case .Big:      return ODIN_ENDIAN != .Big
+					}
+				}
+				return false
+			}
+
 			strings.write_byte(sb, '{')
 			strings.write_byte(sb, '\n')
 
 			bit_data: u64 = 0
 			bit_size := u64(8*ti.size)
+			do_byte_swap := is_bit_set_different_endian_to_platform(info.underlying)
 			switch bit_size {
 				case  0: panic("Don't know how to handle this case")
 				case  8:
@@ -92,12 +107,15 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 					bit_data = u64(x)
 				case 16:
 					x := (^u16)(a.data)^
+					if do_byte_swap do x = bits.byte_swap(x)
 					bit_data = u64(x)
 				case 32:
 					x := (^u32)(a.data)^
+					if do_byte_swap do x = bits.byte_swap(x)
 					bit_data = u64(x)
 				case 64:
 					x := (^u64)(a.data)^
+					if do_byte_swap do x = bits.byte_swap(x)
 					bit_data = u64(x)
 				}
 
@@ -120,30 +138,15 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 				strings.write_byte(sb, '}')
 
 			
+		case reflect.Type_Info_Dynamic_Array:
+			array := cast(^mem.Raw_Dynamic_Array) a.data
+			serialize_slice(sb, indentation, array.data, info.elem, array.len)
+
 		case reflect.Type_Info_Slice:
 			slice := cast(^mem.Raw_Slice) a.data
-			if slice.len == 0 {
-				strings.write_string(sb, "nil")
-			} else {
-				if should_indent(sb) do indent_pls(sb, indentation)
-
-				strings.write_byte(sb, '[')
-				strings.write_int(sb, int(slice.len))
-				strings.write_byte(sb, ']')
-				strings.write_byte(sb, '{')
-				strings.write_byte(sb, '\n')
-
-				for i in 0..<slice.len {
-					data := uintptr(slice.data) + uintptr(i*info.elem_size)
-					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
-				}
-
-				indent_pls(sb, indentation)
-				strings.write_byte(sb, '}')
-			}
+			serialize_slice(sb, indentation, slice.data, info.elem, slice.len)
 
 		case reflect.Type_Info_Array:
-			if should_indent(sb) do indent_pls(sb, indentation)
 			strings.write_byte(sb, '{')
 			strings.write_byte(sb, '\n')
 
@@ -191,7 +194,6 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 			serialize_to_builder(any{a.data, id}, sb, indentation)
 
 		case reflect.Type_Info_Struct:
-			if should_indent(sb) do indent_pls(sb, indentation)
 			strings.write_string(sb, fmt.tprint(a.id))
 			strings.write_byte(sb, '{')
 			strings.write_byte(sb, '\n')
@@ -355,6 +357,9 @@ assign_bool :: proc(val: any, b: bool) {
 	v := reflect.any_core(val)
 	switch &dst in v {
 	case bool: dst = bool(b)
+	case b16 : dst = b16(b)
+	case b32 : dst = b32(b)
+	case b64 : dst = b64(b)
 	case     : panic( fmt.tprintfln("UNIMPLEMENTED: %v", v.id) )
 	}
 }
@@ -363,17 +368,32 @@ assign_bool :: proc(val: any, b: bool) {
 assign_int :: proc(v: any, i: $T) {
 	v := reflect.any_core(v)
 	switch &dst in v {
-		case i8 : dst = cast(i8 ) i
-		case i16: dst = cast(i16) i
-		case i32: dst = cast(i32) i
-		case i64: dst = cast(i64) i
-		case int: dst = cast(int) i
-
-		case u8  : dst = cast(u8  ) i
-		case u16 : dst = cast(u16 ) i
-		case u32 : dst = cast(u32 ) i
-		case u64 : dst = cast(u64 ) i
+		case int : dst = cast(int)  i
 		case uint: dst = cast(uint) i
+
+		case i8: dst = cast(i8) i
+		case u8: dst = cast(u8) i
+
+		case i16  : dst = cast(i16)   i
+		case i16be: dst = cast(i16be) i
+		case i16le: dst = cast(i16le) i
+		case u16  : dst = cast(u16)   i
+		case u16be: dst = cast(u16be) i
+		case u16le: dst = cast(u16le) i
+
+		case i32  : dst = cast(i32)   i
+		case i32be: dst = cast(i32be) i
+		case i32le: dst = cast(i32le) i
+		case u32  : dst = cast(u32)   i
+		case u32be: dst = cast(u32be) i
+		case u32le: dst = cast(u32le) i
+
+		case i64  : dst = cast(i64)   i
+		case i64be: dst = cast(i64be) i
+		case i64le: dst = cast(i64le) i
+		case u64  : dst = cast(u64)   i
+		case u64be: dst = cast(u64be) i
+		case u64le: dst = cast(u64le) i
 
 		case: assert(false, fmt.tprintf("UNIMPLEMENTED: %v\n", v.id))
 	}
@@ -383,9 +403,20 @@ assign_int :: proc(v: any, i: $T) {
 assign_float :: proc(v: any, f: $T) {
 	v := reflect.any_core(v)
 	switch &dst in v {
-		case f16: dst = cast(f16) f
-		case f32: dst = cast(f32) f
-		case f64: dst = cast(f64) f
+		case f16  : dst = cast(f16)   f
+		case f16be: dst = cast(f16be) f
+		case f16le: dst = cast(f16le) f
+
+		case f32  : dst = cast(f32)   f
+		case f32be: dst = cast(f32be) f
+		case f32le: dst = cast(f32le) f
+
+		case f64  : dst = cast(f64)   f
+		case f64be: dst = cast(f64be) f
+		case f64le: dst = cast(f64le) f
+
+		case:
+			panic("Something went terribly wrong")
 	}
 }
 
@@ -454,12 +485,12 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			token := advance(parser)
 			if token.text == "nil" do return
 
-			expect(parser^,  token.kind == .Bracket_Open )
+			expect(parser^,  token.kind == .Parenthesis_Open )
 			token = advance(parser)
 			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
 
 			n := strconv.atoi(token.text)
-			expect(parser^,  advance(parser).kind == .Bracket_Close )
+			expect(parser^,  advance(parser).kind == .Parenthesis_Close )
 			expect(parser^,  advance(parser).kind == .Curly_Bracket_Open )
 
 			data := bytes_make(info.elem.size * n, info.elem.align, parser.allocator)
@@ -556,16 +587,18 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 					break
 				}
 			}
-			if !found do panic(fmt.tprintf("Could not find value: %s for enum of type %v", token.text, a.id))
+			expect(parser^, found, fmt.tprintf("Could not find value: %s for enum of type %v", token.text, a.id))
 
 		case reflect.Type_Info_String:
 			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
+			expect(parser^, token.kind == .quote, fmt.tprintf("Token = %v"))
+			token = advance(parser)
 			switch &dst in a {
 				case string:
 					dst = token.text
 				case cstring: panic("Deserialization of `cstring` is not supported!")
 			}
+			expect(parser^, advance(parser).kind == .quote, fmt.tprintf("Token = %v"))
 
 		case reflect.Type_Info_Struct:
 			token := advance(parser)
@@ -576,7 +609,7 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 			token = advance(parser)
 			for token.kind != .Curly_Bracket_Close {
-				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
+				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
 				expect(parser^, parser.curr_token.kind == .Colon)
 				key := token.text
 
@@ -586,17 +619,28 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 					found = true
 					expect(parser^,  advance(parser).kind == .Colon )
-					if ok, err := contains_tag(field.tag, "no_deserialize"); ok && err == nil {
-						// log.warnf("Don't forget to deserialize the field %v for the %v type", field.name, a) TODO: Do this or nah?
+					if ok, err := contains_tag(field.tag, "no_serialize"); ok && err == nil {
 						token := advance(parser)
-						if token.kind == .Curly_Bracket_Open {
+						if token.kind == .Stream {
+							// Could be the type of a struct
+							if parser.curr_token.kind == .Curly_Bracket_Open {
+								token = advance(parser)
+								// Skip the whole thing
+								curly_bracket_stack_current := parser.curly_bracket_stack
+								for parser.curly_bracket_stack >= curly_bracket_stack_current {
+									advance(parser)
+								}
+							}
+						}
+						else if token.kind == .Curly_Bracket_Open {
 							// Skip the whole thing
 							curly_bracket_stack_current := parser.curly_bracket_stack
 							for parser.curly_bracket_stack >= curly_bracket_stack_current {
 								advance(parser)
 							}
-						} else if token.kind != .Stream {
-							panic(fmt.tprintfln("Token.kind = %v", token.kind))
+						}
+						else {
+							panic(fmt.tprintfln("Token = %v", token))
 						}
 					} else {
 						data_ptr := rawptr( uintptr(a.data) + field.offset )
@@ -651,13 +695,12 @@ Token_Kind :: enum {
 	Curly_Bracket_Open,
 	Curly_Bracket_Close,
 
-	Bracket_Open,
-	Bracket_Close,
-
 	Parenthesis_Open,
 	Parenthesis_Close,
 
 	Colon,
+
+	quote,
 	Stream,
 	End,
 }
@@ -672,6 +715,8 @@ Lexer :: struct {
 	data  : string,
 	cursor: int,
 	tokens: [dynamic]Token,
+
+	is_inside_string: bool,
 }
 
 Parser :: struct {
@@ -759,12 +804,30 @@ lexer_make :: proc(data: string) -> Lexer {
 	return lexer
 }
 
+
 grab_stream :: proc(lexer: ^Lexer) -> string {
+	is_inside_array :: proc(chars: []u8, char: u8) -> bool {
+		for c in chars {
+			if c == char do return true
+		}
+		return false
+	}
+
 	start := lexer.cursor
+	characters_to_sentry: []u8
+	if !lexer.is_inside_string {
+		characters_to_sentry = []u8{' ', '\t', '\n', '{', '}', '[', ']', '(', ')', ':', '#'}
+	}
+	else {
+		characters_to_sentry = []u8{'"', '\n'}
+	}
+	// TODO: If I serialize a string with '\n' it is all fucked
 	loop: for lexer.cursor < len(lexer.data) {
-		switch lexer.data[lexer.cursor] {
-			case ' ', '\t', '\n', '{', '}', '[', ']', '(', ')', ':', '#': break loop // NOTE: Se eu serializar uma string com um '\n' fudeu
-			case: lexer.cursor += 1
+		if is_inside_array(characters_to_sentry, lexer.data[lexer.cursor]) {
+			break loop
+		}
+		else {
+			lexer.cursor += 1
 		}
 	}
 	stream := lexer.data[start:lexer.cursor]
@@ -809,16 +872,6 @@ lex :: proc(lexer: ^Lexer) {
 				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
 				lexer.cursor += 1
 
-			case '[':
-				token.kind = .Bracket_Open
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
-
-			case ']':
-				token.kind = .Bracket_Close
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
-
 			case '(':
 				token.kind = .Parenthesis_Open
 				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
@@ -833,6 +886,12 @@ lex :: proc(lexer: ^Lexer) {
 				token.kind = .Colon
 				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
 				lexer.cursor += 1
+
+			case '"':
+				token.kind = .quote
+				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
+				lexer.cursor += 1
+				lexer.is_inside_string = !lexer.is_inside_string
 
 			case: // Grab the value
 				token.text  = grab_stream(lexer)
@@ -865,4 +924,26 @@ indent_pls :: #force_inline proc(sb: ^strings.Builder, indentation: int) {
 @(private="file")
 should_indent :: #force_inline proc(sb: ^strings.Builder) -> bool {
 	return len(sb.buf) > 0 && sb.buf[len(sb.buf)-1] == '\n'
+}
+
+@(private="file")
+serialize_slice :: proc(sb: ^strings.Builder, indentation: int, base: rawptr,
+						element_info: ^reflect.Type_Info, length: int)
+{
+	if length == 0 {
+		strings.write_string(sb, "nil")
+	}
+	else {
+		strings.write_byte(sb, '(')
+		strings.write_int(sb, int(length))
+		strings.write_byte(sb, ')')
+		strings.write_byte(sb, '{')
+		strings.write_byte(sb, '\n')
+		for i in 0..<length {
+			data := uintptr(base) + uintptr(i*element_info.size)
+			serialize_to_builder(any{rawptr(data), element_info.id}, sb, indentation+4)
+		}
+		indent_pls(sb, indentation)
+		strings.write_byte(sb, '}')
+	}
 }

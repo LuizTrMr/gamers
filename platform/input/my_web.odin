@@ -10,7 +10,7 @@ foreign plat {
 	isMouseButtonDown    :: proc "contextless" (but: i32) -> bool ---
 	isMouseButtonPressed :: proc "contextless" (but: i32) -> bool ---
 	getMousePosX         :: proc "contextless" () -> f32 ---
-	getMousePosy         :: proc "contextless" () -> f32 ---
+	getMousePosY         :: proc "contextless" () -> f32 ---
 	pollKeys             :: proc "contextless" ()                 ---
 }
 
@@ -31,7 +31,11 @@ is_mouse_button_down :: proc "contextless" (button: Mouse_Button) -> bool {
 }
 
 get_mouse_position :: proc() -> [2]f32 {
-	return {getMousePosX(), getMousePosy()}
+	return {getMousePosX(), getMousePosY()}
+}
+
+set_mouse_position :: proc(pos: [2]f32) {
+	// There is no way to implement this on web
 }
 
 poll_keys :: pollKeys

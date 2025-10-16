@@ -127,7 +127,20 @@ process_mouse_button :: proc(button: Mouse_Button) -> (state: State) {
 }
 
 State :: struct {
-	is_down   : bool,
 	is_pressed: bool,
+	is_down   : bool,
 }
 key_to_state: #sparse [Key]State
+
+
+Key_Info :: struct {
+	was_down: bool,
+	half_transitions: i32,
+}
+
+input_state_from_key_info :: proc(info: Key_Info) -> (res:State) {
+	res.is_down    = info.was_down
+	res.is_pressed = (info.was_down  && info.half_transitions >= 1) ||
+					 (!info.was_down && info.half_transitions >= 2)
+	return
+}
