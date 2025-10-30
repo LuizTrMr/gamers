@@ -16,6 +16,7 @@ to_radians :: math.to_radians_f32
 mod        :: math.mod
 sqrt       :: math.sqrt
 floor      :: math.floor
+sign       :: math.sign_f32
 
 roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 	return cast(i32)(v + 0.5)
@@ -56,6 +57,7 @@ dot           :: linalg.vector_dot
 distance      :: linalg.distance
 array_cast    :: linalg.array_cast
 smallest_angle_between :: linalg.angle_between
+orthogonal             :: linalg.orthogonal
 
 @(deprecated="`angle_between` is deprecated, use `smallest_angle_between` instead")
 angle_between :: linalg.angle_between
@@ -92,7 +94,7 @@ angle_from_direction :: proc "contextless" (dir: V2) -> (res:f32) {
 	if dir.y < 0 && dir.y != -0 {
 		res = math.TAU - angle_between
 	}
-	else {res = angle_between}
+	else do res = angle_between
 	return
 }
 
@@ -126,7 +128,7 @@ sample_point_inside_circle :: proc(center: V2, radius: f32) -> (result: V2) {
 }
 
 sample_point_inside_circle_min_max :: proc(center: V2, min_radius, max_radius: f32) -> V2 {
-	theta  := rand.float32() * 2 * PI
+	theta  := rand.float32() * TAU
 	r      := rand.float32_range(min_radius, max_radius)
 	result := V2{ r * math.cos(theta), r * math.sin(theta) }
 	return center + result
@@ -181,7 +183,6 @@ cubic_bezier :: proc "contextless" (p0, p1, p2, p3: V2, t: f32) -> V2 {
 Spline_Type :: enum {
 	catmull,
 	line,
-	// B_Spline, // NOTE(04/02/25): I don't want to think about implementation if I am not gonna use it (which currently is the case)
 }
 
 Spline :: struct {
@@ -214,9 +215,9 @@ create_spline :: proc(points: []V3, type: Spline_Type) -> (spline: Spline) {
 		spline.total_u = cast(f32)len(points) - 3
 
 		for i in 0..<len(points)-3 { // and I could calculate the lengths in advance when I build the final release of the game
-			assert(points[i].z == 0)
-			spline.control_points[i].z  = catmull_spline_calculate_segment_length(spline.control_points, i)
-			spline.total_length        += spline.control_points[i].z
+			assert(points[i+1].z == 0)
+			spline.control_points[i+1].z  = catmull_spline_calculate_segment_length(spline.control_points, i)
+			spline.total_length        += spline.control_points[i+1].z
 		}
 	}
 	return
@@ -248,7 +249,15 @@ line_spline_calculate :: proc(spline: Spline, f: f32) -> (result: V2, ended: boo
 		ended = true
 		return
 	}
-	offset := get_normalized_offset(spline.control_points, f)
+
+	offset := f
+	i: int
+	for offset > spline.control_points[i].z {
+		offset -= spline.control_points[i].z
+		i += 1
+	}
+	offset = f32(i) + (offset / spline.control_points[i].z)
+
 	result = line_spline_get_point(spline.control_points, offset)
 	return
 }
@@ -274,11 +283,12 @@ catmull_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (re
 	return
 }
 
+// TODO: Use a more sofisticated approach to calculate the lengths, mainly in parts where there is a fast variation in gradient
 catmull_spline_calculate_segment_length :: proc(control_points: []V3, u_int: int) -> (length: f32) { // Source: https://www.youtube.com/watch?v=DzjtU4WLYNs
-	step: f32: 0.005
+	step: f32: 0.00001
 	
 	old, new: V2
-	old = control_points[u_int].xy
+	old = catmull_spline_get_point(control_points, f32(u_int))
 	for t: f32 = 0.0; t < 1.0; t += step {
 		new     = catmull_spline_get_point(control_points, f32(u_int)+t)
 		length += distance(old, new)
@@ -324,40 +334,14 @@ line_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
 get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32) {
 	offset := offset
 	i: int
-	for offset > control_points[i].z {
-		offset -= control_points[i].z
+	for offset > control_points[i+1].z {
+		offset -= control_points[i+1].z
 		i += 1
 	}
 
-	result = f32(i) + (offset / control_points[i].z)
+	result = f32(i) + (offset / control_points[i+1].z)
 	return
 }
-
-
-// b_spline :: proc(using spline: ^Spline, delta: f32) -> (result: V2) {
-// 	return 0
-	// u_int := int(u)
-
-	// p0 := u_int
-	// p1 := p0 + 1
-	// p2 := p1 + 1
-	// p3 := p2 + 1
-
-	// t  := u - f32(u_int)
-	// t2 := t*t
-	// t3 := t*t*t
-
-	// q0 := -t3 + 3*t2 - 3*t + 1
-	// q1 := 3*t3 - 6*t2 + 4
-	// q2 := -3*t3 + 3*t2 + 3*t + 1
-	// q3 := t3
-
-	// u += delta
-
-	// result = 0.1666 * (control_points[p0]*q0 + control_points[p1]*q1 + control_points[p2]*q2 + control_points[p3]*q3)
-
-	// return
-// }
 
 //         (__) 
 //         (oo)  @Interpolation and @Easings!
@@ -512,4 +496,9 @@ is_point_inside_polygon :: proc(points: []V2, point: V2, raycast: V2) -> bool {
 	}
 	count += cast(int)line_line_intersection(points[len(points)-1], points[0], raycast_start, raycast_end)
 	return count % 2 != 0
+}
+
+// Idk
+random_direction :: proc() -> V2 {
+	return direction_from_angle(rand.float32() * TAU)
 }
