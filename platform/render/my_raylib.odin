@@ -5,7 +5,9 @@ import "core:fmt"
 import "core:strings"
 
 import rl "vendor:raylib"
+import    "vendor:raylib/rlgl"
 import gl "vendor:OpenGL"
+import    "vendor:glfw"
 
 import mm  "../../my_math"
 
@@ -119,9 +121,34 @@ clear_background :: proc(color: Color) {
 	rl.ClearBackground(to_raylib_color(color))
 }
 
-draw_text :: proc(font: Font, text: cstring, x, y: f32, font_size: i32, color: Color) {
+stencil_init :: proc(major, minor: int) {
+	gl.load_up_to(major, minor, glfw.gl_set_proc_address) 
+	gl.StencilOp(gl.KEEP, gl.KEEP, gl.REPLACE)
+}
+
+stencil_end :: proc() {
+	rlgl.DrawRenderBatchActive()
+	gl.Disable(gl.STENCIL_TEST)
+}
+
+stencil_mask_begin :: proc() {
+	rlgl.DrawRenderBatchActive()
+	gl.Enable(gl.STENCIL_TEST)
+	gl.StencilFunc(gl.ALWAYS, 1, 0xFF)
+}
+
+stencil_mask_end :: proc() {
+	rlgl.DrawRenderBatchActive()
+	gl.StencilFunc(gl.EQUAL, 1, 0xFF)
+}
+
+draw_text_f32 :: proc(font: Font, text: cstring, x, y: f32, font_size: i32, color: Color) {
 	rl.DrawTextEx(font, text, rl.Vector2{x, y}, f32(font_size), 1.0, to_raylib_color(color))
 }
+draw_text_v2 :: proc(font: Font, text: cstring, pos: [2]f32, font_size: i32, color: Color) {
+	rl.DrawTextEx(font, text, pos, f32(font_size), 1.0, to_raylib_color(color))
+}
+draw_text :: proc{draw_text_f32,draw_text_v2}
 
 draw_text_by_center :: proc(font: Font, text: cstring, center: [2]f32, font_size: i32, color: Color, rotation: f32 = 0.0, scale: f32 = 1.0) {
 	text_size := get_text_size(font, text, f32(font_size))
@@ -206,6 +233,23 @@ draw_multi_texture :: proc(multi_texture: Multi_Texture, #any_int index: i32, x,
 
 	src    := rl.Rectangle{grid_x*texture_width, grid_y*texture_height, texture_width, texture_height}
 	dst    := rl.Rectangle{x+half_width, y+half_height, texture_width*scale, texture_height*scale}
+	origin := rl.Vector2{half_width, half_height}
+
+	rl.DrawTexturePro(multi_texture.texture, src, dst, origin, rotation, to_raylib_color(color))
+}
+
+draw_multi_texture_by_center :: proc(multi_texture: Multi_Texture, #any_int index: i32, center: mm.V2, color: Color = WHITE, rotation: f32 = 0.0, scale: f32 = 1.0) {
+	texture_width  := f32(multi_texture.texture.width  / multi_texture.info.cols)
+	texture_height := f32(multi_texture.texture.height / multi_texture.info.rows)
+
+	half_width  := texture_width  * 0.5 * scale
+	half_height := texture_height * 0.5 * scale
+
+	grid_x := f32(index % multi_texture.info.cols)
+	grid_y := f32(index / multi_texture.info.cols)
+
+	src    := rl.Rectangle{grid_x*texture_width, grid_y*texture_height, texture_width, texture_height}
+	dst    := rl.Rectangle{center.x, center.y, texture_width*scale, texture_height*scale}
 	origin := rl.Vector2{half_width, half_height}
 
 	rl.DrawTexturePro(multi_texture.texture, src, dst, origin, rotation, to_raylib_color(color))

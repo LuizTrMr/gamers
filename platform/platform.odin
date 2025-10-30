@@ -14,8 +14,8 @@ write_entire_file :: proc(name: string, data: []byte, truncate := true) -> (succ
 	return _write_entire_file(name, data, truncate)
 }
 
-set_target_fps :: proc(fps: i32) {
-	_set_target_fps(fps)
+set_target_frames :: proc(fps: i32) {
+	_set_target_frames(fps)
 }
 
 get_frame_duration :: proc() -> f32 {

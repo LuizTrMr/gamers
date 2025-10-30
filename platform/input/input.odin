@@ -50,8 +50,8 @@ Key :: enum i32 { // TODO: Add all of the keyyyyyyyyyyyyyyyyys (There are prolly
 	u = 85,
 	v = 86,
 	w = 87,
-	y = 88,
-	x = 89,
+	x = 88,
+	y = 89,
 	z = 90,
 
 	escape = 256,

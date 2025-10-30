@@ -25,6 +25,16 @@ ORANGE     :: Color{1.0  , 0.498, 0.313, 1.0}
 BROWN      :: Color{0.550, 0.270, 0.070, 1.0}
 EDITOR     :: Color{0.561, 0.788, 0.949, 1.0}
 
+DEBUG_COLOR :: Color{0.325, 0.498, 0.901, 1.0}
+
+cycling_colors := [?]Color{
+	RED,
+	BLUE,
+	FULL_GREEN,
+	PURPLE,
+	ORANGE,
+}
+
 // Color Harmonies
 complementary_from :: proc(color: Color) -> (res: Color) {
 	res.rgb = 1 - color.rgb

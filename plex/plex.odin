@@ -13,6 +13,11 @@ import "core:strconv"
 import "core:log"
 
 // TODO: Add things that return allocator error
+//  - Convert to using .plex format
+//      - Add the type of the struct in the beginning just as sort of a documentation for someone reading the file? We already do it I think. But it is optional, we can enforce it
+// - Put ',' after values to make it easy to coy to odin code
+//      - Put '=' instead of ':'
+//      - Put '.' before the value of an `enum`
 
 Serializer_Config :: struct { // TODO: Add more stuff
 	float_precision: int,
@@ -276,20 +281,16 @@ contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> (ok: 
 
 serialize_to_file :: proc(a: any, path: string, loc := #caller_location) -> mem.Allocator_Error {
 	assert(a != nil, "a is `nil`")
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
 
 	builder := strings.builder_make(context.temp_allocator) or_return
 	serialize_to_builder(a, &builder, 0)
 	contents := strings.to_string(builder)
 
-	sb := strings.builder_make(context.temp_allocator) or_return
-	strings.write_string(&sb, path)
-	strings.write_byte  (&sb, '.')
-	reflect.write_typeid(&sb, a.id)
-
-	full_path := strings.to_string(sb)
-
-	ok := os.write_entire_file(full_path, transmute([]byte) contents)
-	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file: %v", full_path), loc)
+	ok := os.write_entire_file(path, transmute([]byte) contents)
+	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file `%v`", full_path), loc)
 	return nil
 }
 
@@ -326,23 +327,23 @@ deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocat
 	}
 	underlying_id := ti.variant.(reflect.Type_Info_Pointer).elem.id
 
-	sb := strings.builder_make(context.temp_allocator) or_return
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
 
-	strings.write_string(&sb, path)
-	strings.write_byte(&sb, '.')
-	reflect.write_typeid(&sb, underlying_id)
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
 
-	full_path := strings.to_string(sb)
-
-	contents, ok := os.read_entire_file(full_path, context.temp_allocator)
-	assert(ok, fmt.tprintln(ERROR + ": Could not read file: ", full_path))
+	contents, ok := os.read_entire_file(path, context.temp_allocator)
+	assert(ok, fmt.tprintfln(ERROR + ": Could not read file `%v`", path))
 
 	lexer := lexer_make(string(contents))
 	lex(&lexer)
 
 	alloc, is_valid := allocator.?
 	if !is_valid do alloc = context.allocator // If `nil` is passed just use context.allocator
-	parser := parser_make(lexer, full_path, alloc)
+	parser := parser_make(lexer, path, alloc)
 
 	data := any{(^rawptr)(a.data)^, underlying_id}
 	// log.infof("Start Deserializing type: %v", a.id)
