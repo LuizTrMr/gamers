@@ -34,6 +34,7 @@ norm :: normalize_f32
 norm_clamped :: proc "contextless" (start, end, value: f32) -> f32 {
 	return clamp(norm(start, end, value), 0, 1)
 }
+normalize_clamped :: norm_clamped
 
 //    /\
 //   ( /   @ @    ()   @V2 stuff!
@@ -62,11 +63,20 @@ orthogonal             :: linalg.orthogonal
 @(deprecated="`angle_between` is deprecated, use `smallest_angle_between` instead")
 angle_between :: linalg.angle_between
 
-V2_ZERO  : V2 : 0
-V2_UP    : V2 : {0,-1}
-V2_RIGHT : V2 : {1, 0}
-V2_DOWN  : V2 : {0, 1}
-V2_LEFT  : V2 : {-1,0}
+UP    : V2 : {0,-1}
+RIGHT : V2 : {1, 0}
+DOWN  : V2 : {0, 1}
+LEFT  : V2 : {-1,0}
+
+// TODO: Remove
+V2_UP    :: UP
+V2_RIGHT :: RIGHT
+V2_DOWN  :: DOWN
+V2_LEFT  :: LEFT
+
+from_to :: #force_inline proc "contextless" (from, to: V2) -> V2 {
+	return to-from
+}
 
 clamp_v2 :: proc "contextless" (v, minimum, maximum: V2) -> (res:V2) {
 	res.x = clamp(v.x, minimum.x, maximum.x)
@@ -79,7 +89,8 @@ signed_angle_between :: proc "contextless" (a, b: V2) -> f32 { // Source: https:
 	return math.atan2(cross, dot(a, b))
 }
 
-rotate_v2 :: proc "contextless" (v: V2, radians: f32) -> V2 {
+@(require_results)
+rotate_v2 :: proc "contextless" (v: V2, radians: f32) -> V2 { // Clockwise in raylib
 	cos := math.cos(radians)
 	sin := math.sin(radians)
 	return {
@@ -87,10 +98,11 @@ rotate_v2 :: proc "contextless" (v: V2, radians: f32) -> V2 {
 		v.x * sin + v.y * cos,
 	}
 }
+rotate :: rotate_v2
 
 angle_from_direction :: proc "contextless" (dir: V2) -> (res:f32) {
 	dir := normalize(dir)
-	angle_between := smallest_angle_between(V2_RIGHT, dir)
+	angle_between := smallest_angle_between(RIGHT, dir)
 	if dir.y < 0 && dir.y != -0 {
 		res = math.TAU - angle_between
 	}
@@ -233,12 +245,21 @@ calculate :: proc(spline: Spline, delta: f32, speed: f32) -> (result: V2, ended:
 }
 
 @(require_results)
+spline_get_normalized_offset :: proc(spline: Spline, offset: f32) -> (res:f32) {
+	switch spline.type {
+	case .catmull: res = catmull_spline_get_normalized_offset(spline.control_points, offset)
+	case .line   : res = line_spline_get_normalized_offset(spline.control_points, offset)
+	}
+	return
+}
+
+@(require_results)
 catmull_spline_calculate :: proc(spline: Spline, f: f32) -> (result: V2, ended: bool) {
 	if f >= spline.total_length {
 		ended = true
 		return
 	}
-	offset := get_normalized_offset(spline.control_points, f)
+	offset := catmull_spline_get_normalized_offset(spline.control_points, f)
 	result = catmull_spline_get_point(spline.control_points, offset)
 	return
 }
@@ -259,27 +280,6 @@ line_spline_calculate :: proc(spline: Spline, f: f32) -> (result: V2, ended: boo
 	offset = f32(i) + (offset / spline.control_points[i].z)
 
 	result = line_spline_get_point(spline.control_points, offset)
-	return
-}
-
-increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
-	switch spline.type {
-	case .catmull: result = catmull_spline_increment(spline, delta, speed)
-	case .line   : result = line_spline_increment(spline, delta, speed)
-	}
-	return
-}
-
-line_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
-	offset := get_normalized_offset(spline.control_points, spline.f)
-	result  = line_spline_get_point(spline.control_points, offset)
-	spline.f += delta * speed
-	return
-}
-
-catmull_spline_increment :: proc(spline: ^Spline, delta: f32, speed: f32) -> (result: V2) {
-	result, _ = catmull_spline_calculate(spline^, spline.f)
-	spline.f += delta * speed
 	return
 }
 
@@ -321,6 +321,45 @@ catmull_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
 }
 
 @(require_results)
+catmull_spline_get_gradient :: proc(control_points: []V3, u: f32) -> (result: V2) {
+	assert(u >= 0)
+	u_int := int(u)
+
+	p1 := u_int + 1
+	p0 := p1-1
+	p2 := p1 + 1
+	p3 := p2 + 1
+
+	t  := u - f32(u_int)
+	t2 := t*t
+	t3 := t*t*t
+
+	q0 := -3*t2 + 4*t - 1
+	q1 := 9*t2 - 10*t
+	q2 := -9*t2 + 8*t + 1
+	q3 := 3*t2 - 2*t
+
+	result = 0.5 * (control_points[p0].xy*q0 + control_points[p1].xy*q1 + control_points[p2].xy*q2 + control_points[p3].xy*q3)
+	return
+}
+
+spline_get_gradient :: proc(spline: Spline, u: f32) -> (result: V2) {
+	switch spline.type {
+	case .catmull: result = catmull_spline_get_gradient(spline.control_points, u)
+	case .line   : result = line_spline_get_gradient(spline.control_points, u)
+	}
+	return
+}
+
+@(require_results)
+line_spline_get_gradient :: proc(control_points: []V3, u: f32) -> (result: V2) {
+	assert(u >= 0)
+	u_int := int(u)
+	result = from_to(control_points[u_int].xy, control_points[u_int+1].xy)
+	return
+}
+
+@(require_results)
 line_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
 	assert(u >= 0)
 
@@ -331,7 +370,7 @@ line_spline_get_point :: proc(control_points: []V3, u: f32) -> (result: V2) {
 }
 
 @(require_results)
-get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32) {
+catmull_spline_get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32) {
 	offset := offset
 	i: int
 	for offset > control_points[i+1].z {
@@ -342,6 +381,20 @@ get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32
 	result = f32(i) + (offset / control_points[i+1].z)
 	return
 }
+
+@(require_results)
+line_spline_get_normalized_offset :: proc(control_points: []V3, offset: f32) -> (result: f32) {
+	offset := offset
+	i: int
+	for offset > control_points[i].z {
+		offset -= control_points[i].z
+		i += 1
+	}
+
+	result = f32(i) + (offset / control_points[i].z)
+	return
+}
+
 
 //         (__) 
 //         (oo)  @Interpolation and @Easings!
@@ -467,6 +520,17 @@ bounds_size :: proc "contextless" (b: Bounds) -> V2 {
 	return b.end-b.start
 }
 
+bounds_center :: proc "contextless" (b: Bounds) -> V2 {
+	return b.start+bounds_size(b)/2
+}
+
+out_of_bounds :: proc "contextless" (object, bounds: Bounds) -> bool {
+	return object.end.x   < bounds.start.x ||
+	   	   object.start.x > bounds.end.x   ||
+	   	   object.end.y   < bounds.start.x ||
+	   	   object.start.y > bounds.end.y  
+}
+
 clockwise_points_from_bounds :: proc(bounds: Bounds) -> (p0, p1, p2, p3: V2) {
 	size := bounds_size(bounds)
 	p0 = bounds.start
@@ -498,7 +562,11 @@ is_point_inside_polygon :: proc(points: []V2, point: V2, raycast: V2) -> bool {
 	return count % 2 != 0
 }
 
-// Idk
+// @Random
 random_direction :: proc() -> V2 {
 	return direction_from_angle(rand.float32() * TAU)
+}
+
+random_int31_range :: proc(min, max: i32) -> i32 {
+	return min + (rand.int31() % (max-min+1))
 }
