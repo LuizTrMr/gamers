@@ -135,7 +135,15 @@ key_to_state: #sparse [Key]State
 
 Key_Info :: struct {
 	was_down: bool,
-	half_transitions: i32,
+	half_transitions: u8,
+}
+
+ctx_is_key_pressed :: proc(ctx: ^Context, key: Key) -> bool {
+	return input_state_from_key_info(ctx.keys.info[key]).is_pressed
+}
+
+ctx_is_key_down :: proc(ctx: ^Context, key: Key) -> bool {
+	return input_state_from_key_info(ctx.keys.info[key]).is_down
 }
 
 input_state_from_key_info :: proc(info: Key_Info) -> (res:State) {
@@ -143,4 +151,29 @@ input_state_from_key_info :: proc(info: Key_Info) -> (res:State) {
 	res.is_pressed = (info.was_down  && info.half_transitions >= 1) ||
 					 (!info.was_down && info.half_transitions >= 2)
 	return
+}
+
+// TODO: Don't ship this, jszus
+Context :: struct {
+	keys: struct {
+		info: #sparse [Key]Key_Info,
+	},
+}
+
+poll_events_accumulate :: proc(ctx: ^Context) {
+	for key in Key {
+		info := &ctx.keys.info[key]
+		is_down := is_key_down(key)
+		transitioned := info.was_down != is_down
+		if transitioned {
+			info.half_transitions += 1
+		}
+		info.was_down = is_down
+	}
+}
+
+poll_events_reset :: proc(ctx: ^Context) {
+	for key in Key {
+		ctx.keys.info[key].half_transitions = 0
+	}
 }
