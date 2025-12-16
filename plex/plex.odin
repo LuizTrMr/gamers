@@ -1,4 +1,4 @@
-package gamers_libs
+package gamers_plex
 
 import "base:intrinsics"
 import "base:runtime"
@@ -12,21 +12,90 @@ import "core:reflect"
 import "core:strconv"
 import "core:log"
 
-// TODO: Add things that return allocator error
-//  - Convert to using .plex format
-//      - Add the type of the struct in the beginning just as sort of a documentation for someone reading the file? We already do it I think. But it is optional, we can enforce it
-// - Put ',' after values to make it easy to coy to odin code
-//      - Put '=' instead of ':'
-//      - Put '.' before the value of an `enum`
+// TODO:
+//  - Convert the structs in the game from serder to .plex type
 
-Serializer_Config :: struct { // TODO: Add more stuff
+Serializer_Config :: struct {
 	float_precision: int,
 }
 default_serializer_config :: Serializer_Config{
 	float_precision = 4,
 }
 
-serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0, config: Serializer_Config = default_serializer_config) {
+serialize_to_file_any :: proc(a: any, path: string, config: Serializer_Config = default_serializer_config, loc := #caller_location) -> mem.Allocator_Error
+{
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
+
+	builder := strings.builder_make(context.temp_allocator) or_return
+	serialize_to_builder_any(a, &builder, 0, config)
+	contents := strings.to_string(builder)
+	ok := os.write_entire_file(path, transmute([]byte) contents)
+	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file `%v`", path), loc)
+	return nil
+}
+
+serialize_to_file :: proc(s: $T, path: string, config: Serializer_Config = default_serializer_config, loc := #caller_location) -> mem.Allocator_Error
+where intrinsics.type_is_struct(T) {
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
+
+	builder := strings.builder_make(context.temp_allocator) or_return
+	serialize_to_builder(s, &builder, 0, config)
+	contents := strings.to_string(builder)
+	ok := os.write_entire_file(path, transmute([]byte) contents)
+	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file `%v`", path), loc)
+	return nil
+}
+
+serialize_to_builder :: proc(s: $T, sb: ^strings.Builder, indentation: int, config: Serializer_Config = default_serializer_config)
+where intrinsics.type_is_struct(T) {
+	strings.write_string(sb, "{\n")
+	for field, i in reflect.struct_fields_zipped(T) {
+		if ok, err := contains_tag(field.tag, "deprecated")  ; ok && err == nil do continue
+		if ok, err := contains_tag(field.tag, "no_serialize"); ok && err == nil do continue
+
+		indent_pls(sb, 4)
+		strings.write_string(sb, field.name)
+		strings.write_byte(sb, ASSIGN_TOKEN)
+		strings.write_byte(sb, ' ')
+
+		field_value := reflect.struct_field_value_by_name(s, field.name)
+		serialize_to_builder_any(field_value, sb, 4, config)
+	}
+	strings.write_byte(sb, '}')
+}
+
+deserialize_from_file :: proc(s: ^$T, path: string, allocator: mem.Allocator) -> mem.Allocator_Error
+where intrinsics.type_is_struct(T) {
+	if !strings.has_suffix(path, ".plex") {
+		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
+	}
+
+	contents, ok := os.read_entire_file(path, context.temp_allocator)
+	assert(ok, fmt.tprintfln(ERROR + ": Could not read file `%v`", path))
+	t := tokenizer_make(path, string(contents))
+	tokenize(&t)
+	parser := parser_make(t, path, allocator)
+
+	return deserialize_from_parser_any(s, &parser)
+}
+
+// `label` helps when debugging
+deserialize_from_data :: proc(s: ^$T, data: []byte, label: string, allocator: mem.Allocator) -> mem.Allocator_Error
+where intrinsics.type_is_struct(T) {
+	t := tokenizer_make(label, string(data))
+	tokenize(&t)
+	parser := parser_make(t, label, allocator)
+
+	deserialize_from_parser_any(s, &parser)
+	return nil
+}
+
+@(private="file")
+serialize_to_builder_any :: proc(a: any, sb: ^strings.Builder, indentation: int = 0, config: Serializer_Config) {
 	assert(a != nil, "a is `nil`")
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
@@ -48,11 +117,13 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 				for i in 0..<info.count {
 					key := enum_type.names[i]
 					indent_pls(sb, indentation+4)
+					strings.write_byte(sb, '.')
 					strings.write_string(sb, key)
-					strings.write_string(sb, ": ")
+					strings.write_byte(sb, ASSIGN_TOKEN)
+					strings.write_byte(sb, ' ')
 
 					data := uintptr(a.data) + uintptr(i*info.elem_size)
-					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
+					serialize_to_builder_any(any{rawptr(data), info.elem.id}, sb, indentation+4, config)
 				}
 			} else {
 				count := len(enum_type.values)
@@ -67,14 +138,16 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 				for i in 0..<count {
 					key := enum_type.names[i]
 					indent_pls(sb, indentation+4)
+					strings.write_byte(sb, '.')
 					strings.write_string(sb, key)
-					strings.write_string(sb, ": ")
+					strings.write_byte(sb, ASSIGN_TOKEN)
+					strings.write_byte(sb, ' ')
 
 					if i != 0 {
 						sum += int(enum_type.values[i]) - int(enum_type.values[i-1])
 					}
 					data := uintptr(a.data) + uintptr(sum*info.elem_size)
-					serialize_to_builder(any{rawptr(data), info.elem.id}, sb, indentation+4)
+					serialize_to_builder_any(any{rawptr(data), info.elem.id}, sb, indentation+4, config)
 				}
 
 			}
@@ -124,32 +197,31 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 					bit_data = u64(x)
 				}
 
-				for i in info.lower..<info.upper {
+				for i in info.lower..=info.upper {
 					mask: u64 = 1 << u64(i)
 					if bit_data & mask != 0 {
 						fields := reflect.enum_fields_zipped(info.elem.id)
 						for field in fields {
 							if u64(field.value) == u64(i) {
 								indent_pls(sb, indentation+4)
+								strings.write_byte(sb, '.')
 								strings.write_string(sb, field.name)
-								strings.write_byte(sb, '\n')
+								strings.write_string(sb, ",\n")
 								break
 							}
 						}
 					}
 				}
-
 				indent_pls(sb, indentation)
 				strings.write_byte(sb, '}')
-
 			
 		case reflect.Type_Info_Dynamic_Array:
 			array := cast(^mem.Raw_Dynamic_Array) a.data
-			serialize_slice(sb, indentation, array.data, info.elem, array.len)
+			serialize_slice(sb, indentation, array.data, info.elem, array.len, config)
 
 		case reflect.Type_Info_Slice:
 			slice := cast(^mem.Raw_Slice) a.data
-			serialize_slice(sb, indentation, slice.data, info.elem, slice.len)
+			serialize_slice(sb, indentation, slice.data, info.elem, slice.len, config)
 
 		case reflect.Type_Info_Array:
 			strings.write_byte(sb, '{')
@@ -158,13 +230,15 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 			for i in 0..<info.count {
 				data_address := uintptr(a.data) + uintptr(i*info.elem_size)
 				indent_pls(sb, indentation+4)
-				serialize_to_builder(any{rawptr(data_address), info.elem.id}, sb, indentation+4)
+				serialize_to_builder_any(any{rawptr(data_address), info.elem.id}, sb, indentation+4, config)
 			}
 
 			indent_pls(sb, indentation)
 			strings.write_byte(sb, '}')
 
 		case reflect.Type_Info_Union:
+			panic("Don't use unions pls")
+			/*
 			assert(len(info.variants) > 0 || a.data != nil, "Shit is empty")
 
 			tag_address := uintptr(a.data) + info.tag_offset
@@ -196,35 +270,39 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 			reflect.write_type_builder(sb, info.variants[tag])
 			strings.write_byte(sb, ')')
 
-			serialize_to_builder(any{a.data, id}, sb, indentation)
+			serialize_to_builder_any(any{a.data, id}, sb, indentation, config)
+			*/
 
 		case reflect.Type_Info_Struct:
-			strings.write_string(sb, fmt.tprint(a.id))
 			strings.write_byte(sb, '{')
 			strings.write_byte(sb, '\n')
 
 			for field, i in reflect.struct_fields_zipped(a.id) {
-				if ok, err := contains_tag(field.tag, "deprecated"); ok && err == nil do continue
+				if ok, err := contains_tag(field.tag, "deprecated")  ; ok && err == nil do continue
+				if ok, err := contains_tag(field.tag, "no_serialize"); ok && err == nil do continue
 				indent_pls(sb, indentation+4)
 				strings.write_string(sb, field.name)
-				strings.write_byte(sb, ':')
+				strings.write_byte(sb, ASSIGN_TOKEN)
 				strings.write_byte(sb, ' ')
 
 				field_value := reflect.struct_field_value_by_name(a, field.name)
-				serialize_to_builder(field_value, sb, indentation+4)
+				serialize_to_builder_any(field_value, sb, indentation+4, config)
 			}
 
 			indent_pls(sb, indentation)
 			strings.write_byte(sb, '}')
 
 		case reflect.Type_Info_Enum:
+			strings.write_byte(sb, '.')
 			strings.write_string(sb, reflect.enum_string(a))
 
 		case reflect.Type_Info_String:
+			strings.write_byte(sb, '"')
 			switch s in a {
 				case string : strings.write_string(sb, s)
 				case cstring: strings.write_string(sb, string(s))
 			}
+			strings.write_byte(sb, '"')
 
 		case reflect.Type_Info_Boolean:
 			val: bool
@@ -240,19 +318,90 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 		case reflect.Type_Info_Integer:
 			a := reflect.any_core(a)
 			switch i in a {
-				case i8 : strings.write_int(sb, int(i))
-				case i16: strings.write_int(sb, int(i))
-				case i32: strings.write_int(sb, int(i))
-				case i64: strings.write_int(sb, int(i))
-				case int: strings.write_int(sb, i)
+			case int:
+				#assert(size_of(int) <= 8)
+				len := strings.write_int(sb, i, 10)
+			case uint:
+				#assert(size_of(uint) <= 8)
+				strings.write_uint(sb, i, 10)
+			case uintptr:
+				#assert(size_of(uint) <= 8)
+				strings.write_uint(sb, uint(i), 10)
 
-				case u8  : strings.write_uint(sb, uint(i))
-				case u16 : strings.write_uint(sb, uint(i))
-				case u32 : strings.write_uint(sb, uint(i))
-				case u64 : strings.write_uint(sb, uint(i))
-				case uint: strings.write_uint(sb, i)
-				case: panic( fmt.tprintf("Not implemented: %v\n", a.id) )
+			case i8:
+				strings.write_int(sb, int(i), 10)
+			case u8:
+				strings.write_uint(sb, uint(i), 10)
+
+			case i16:
+				strings.write_int(sb, int(i), 10)
+			case i16le:
+				strings.write_int(sb, int(i), 10)
+			case i16be:
+				strings.write_int(sb, int(i), 10)
+
+			case u16:
+				strings.write_uint(sb, uint(i), 10)
+			case u16le:
+				strings.write_uint(sb, uint(i), 10)
+			case u16be:
+				strings.write_uint(sb, uint(i), 10)
+
+			case i32:
+				strings.write_int(sb, int(i), 10)
+			case i32le:
+				strings.write_int(sb, int(i), 10)
+			case i32be:
+				strings.write_int(sb, int(i), 10)
+			case u32:
+				strings.write_uint(sb, uint(i), 10)
+			case u32le:
+				strings.write_uint(sb, uint(i), 10)
+			case u32be:
+				strings.write_uint(sb, uint(i), 10)
+
+			case i64:
+				strings.write_i64(sb, i, 10)
+			case i64le:
+				strings.write_i64(sb, i64(i), 10)
+			case i64be:
+				strings.write_i64(sb, i64(i), 10)
+
+			case u64:
+				strings.write_u64(sb, i, 10)
+			case u64le:
+				strings.write_u64(sb, u64(i), 10)
+			case u64be:
+				strings.write_u64(sb, u64(i), 10)
+
+			case i128:
+				buf: [40]byte
+				s := strconv.write_bits_128(buf[:], u128(i), 10, true, 128, base_10_digits, {})
+				strings.write_string(sb, s)
+			case i128le:
+				buf: [40]byte
+				s := strconv.write_bits_128(buf[:], u128(i), 10, true, 128, base_10_digits, {})
+				strings.write_string(sb, s)
+			case i128be:
+				buf: [40]byte
+				s := strconv.write_bits_128(buf[:], u128(i), 10, true, 128, base_10_digits, {})
+				strings.write_string(sb, s)
+			case u128:
+				buf: [40]byte
+				s := strconv.write_u128(buf[:], i, 10)
+				strings.write_string(sb, s)
+			case u128le:
+				buf: [40]byte
+				s := strconv.write_u128(buf[:], u128(i), 10)
+				strings.write_string(sb, s)
+			case u128be:
+				buf: [40]byte
+				s := strconv.write_u128(buf[:], u128(i), 10)
+				strings.write_string(sb, s)
+
+			case: panic( fmt.tprintf("Not implemented: %v\n", a.id) )
 			}
+
 
 		case reflect.Type_Info_Float:
 			a := reflect.any_core(a)
@@ -268,56 +417,13 @@ serialize_to_builder :: proc(a: any, sb: ^strings.Builder, indentation: int = 0,
 
 	}
 
+	strings.write_byte(sb, ',')
 	strings.write_byte(sb, '\n')
 }
 
-contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> (ok: bool, err: mem.Allocator_Error) {
-	tags := strings.split(string(struct_tags), " ", context.temp_allocator) or_return
-	for t in tags {
-		if t == tag_name do return true, nil
-	}
-	return false, nil
-}
 
-serialize_to_file :: proc(a: any, path: string, loc := #caller_location) -> mem.Allocator_Error {
-	assert(a != nil, "a is `nil`")
-	if !strings.has_suffix(path, ".plex") {
-		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
-	}
-
-	builder := strings.builder_make(context.temp_allocator) or_return
-	serialize_to_builder(a, &builder, 0)
-	contents := strings.to_string(builder)
-
-	ok := os.write_entire_file(path, transmute([]byte) contents)
-	assert(ok, fmt.tprintfln(ERROR + ": Failed to write serialized string to file `%v`", full_path), loc)
-	return nil
-}
-
-deserialize_from_data :: proc(a: any, data: []byte, label: string, allocator: Maybe(mem.Allocator)) {
-	assert(a != nil, "a is `nil`")
-	a := a
-	a = reflect.any_base(a)
-
-	ti := type_info_of(a.id)
-	if !reflect.is_pointer(ti) || ti.id == rawptr {
-		panic("NOT A POINTER")
-	}
-	underlying_id := ti.variant.(reflect.Type_Info_Pointer).elem.id
-
-	lexer := lexer_make(string(data))
-	lex(&lexer)
-
-	alloc, is_valid := allocator.?
-	if !is_valid do alloc = context.allocator // If `nil` is passed just use context.allocator
-	parser := parser_make(lexer, label, alloc)
-
-	data := any{(^rawptr)(a.data)^, underlying_id}
-	deserialize_from_string(data, &parser)
-	assert(parser.curr_token.kind == .End)
-}
-
-deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocator)) -> mem.Allocator_Error {
+@(private)
+deserialize_from_parser_any :: proc(a: any, parser: ^Parser) -> mem.Allocator_Error {
 	assert(a != nil, "a is `nil`")
 	a := reflect.any_base(a)
 
@@ -327,28 +433,8 @@ deserialize_from_file :: proc(a: any, path: string, allocator: Maybe(mem.Allocat
 	}
 	underlying_id := ti.variant.(reflect.Type_Info_Pointer).elem.id
 
-	if !strings.has_suffix(path, ".plex") {
-		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
-	}
-
-	if !strings.has_suffix(path, ".plex") {
-		panic(fmt.tprintfln("Path `%v` needs to be a .plex file!", path))
-	}
-
-	contents, ok := os.read_entire_file(path, context.temp_allocator)
-	assert(ok, fmt.tprintfln(ERROR + ": Could not read file `%v`", path))
-
-	lexer := lexer_make(string(contents))
-	lex(&lexer)
-
-	alloc, is_valid := allocator.?
-	if !is_valid do alloc = context.allocator // If `nil` is passed just use context.allocator
-	parser := parser_make(lexer, path, alloc)
-
 	data := any{(^rawptr)(a.data)^, underlying_id}
-	// log.infof("Start Deserializing type: %v", a.id)
-	deserialize_from_string(data, &parser)
-	// log.infof("End   Deserializing type: %v", a.id)
+	deserialize_from_parser(data, parser)
 	assert(parser.curr_token.kind == .End)
 	return nil
 }
@@ -396,6 +482,15 @@ assign_int :: proc(v: any, i: $T) {
 		case u64be: dst = cast(u64be) i
 		case u64le: dst = cast(u64le) i
 
+		case i128  : dst = cast(i128)   i
+		case i128le: dst = cast(i128le) i
+		case i128be: dst = cast(i128be) i
+		case u128  : dst = cast(u128)   i
+		case u128le: dst = cast(u128le) i
+		case u128be: dst = cast(u128be) i
+
+		case uintptr: dst = cast(uintptr) i
+
 		case: assert(false, fmt.tprintf("UNIMPLEMENTED: %v\n", v.id))
 	}
 }
@@ -422,7 +517,7 @@ assign_float :: proc(v: any, f: $T) {
 }
 
 @(private="file")
-deserialize_from_string :: proc(a: any, parser: ^Parser) {
+deserialize_from_parser :: proc(a: any, parser: ^Parser) {
 	assert(a != nil, fmt.tprintfln("a is `nil` while trying to parse: %v", parser.path))
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
@@ -431,16 +526,10 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 		case reflect.Type_Info_Dynamic_Array:
 			token := advance(parser)
-			if token.text == "nil" do return
+			if token.text == "nil" do break
+			expect(parser^,  token.kind == .Curly_Bracket_Open )
 
-			expect(parser^,  token.kind == .Parenthesis_Open )
-			token = advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
-
-			n := strconv.atoi(token.text)
-			expect(parser^,  advance(parser).kind == .Parenthesis_Close )
-			expect(parser^,  advance(parser).kind == .Curly_Bracket_Open )
-
+			n := count_number_of_elements_in_slice(parser, info.elem)
 			data := bytes_make(info.elem.size * n, info.elem.align, parser.allocator)
 			raw := (^mem.Raw_Dynamic_Array)(a.data)
 			raw.data = raw_data(data)
@@ -452,16 +541,10 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			
 		case reflect.Type_Info_Slice:
 			token := advance(parser)
-			if token.text == "nil" do return
+			if token.text == "nil" do break
+			expect(parser^,  token.kind == .Curly_Bracket_Open)
 
-			expect(parser^,  token.kind == .Parenthesis_Open )
-			token = advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
-
-			n := strconv.atoi(token.text)
-			expect(parser^,  advance(parser).kind == .Parenthesis_Close )
-			expect(parser^,  advance(parser).kind == .Curly_Bracket_Open )
-
+			n := count_number_of_elements_in_slice(parser, info.elem)
 			data := bytes_make(info.elem.size * n, info.elem.align, parser.allocator)
 			raw := (^mem.Raw_Slice)(a.data)
 			raw.data = raw_data(data)
@@ -469,15 +552,18 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			assign_array(raw.data, info.elem, uintptr(n), parser)
 			expect(parser^,  advance(parser).kind == .Curly_Bracket_Close)
 
-		case reflect.Type_Info_Enumerated_Array:
-			index_ti  := reflect.type_info_base(info.index)
-			enum_type := index_ti.variant.(reflect.Type_Info_Enum)
 
+		case reflect.Type_Info_Enumerated_Array:
 			token := advance(parser)
-			if token.text == "nil" do return
+			if token.text == "nil" do break
 			expect(parser^, token.kind == .Curly_Bracket_Open)
 
+			index_ti  := reflect.type_info_base(info.index)
+			enum_type := index_ti.variant.(reflect.Type_Info_Enum)
 			for parser.curr_token.kind != .Curly_Bracket_Close {
+				token = advance(parser)
+				expect(parser^, token.kind == .Dot, fmt.tprintf("Token = %v", token))
+
 				token = advance(parser)
 				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
 				key := token.text
@@ -494,29 +580,14 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 				expect(parser^, found, fmt.tprintf("Couldn't find a value for key: %v", key) )
 				expect(parser^, index < info.count, fmt.tprintf("I don't know what happened here, key value: ", key) )
 
-				expect(parser^, advance(parser).kind == .Colon )
+				expect(parser^, advance(parser).kind == .Assign )
 				index_ptr := rawptr(uintptr(a.data) + uintptr(index*info.elem_size))
 				index_any := any{index_ptr, info.elem.id}
 
-				deserialize_from_string(index_any, parser)
+				deserialize_from_parser(index_any, parser)
 			}
 
 			expect(parser^, advance(parser).kind == .Curly_Bracket_Close )
-
-		case reflect.Type_Info_Pointer:
-			if parser.curr_token.text == "nil" {
-                advance(parser)
-                return
-            }
-
-            ptr, err := mem.alloc(info.elem.size, info.elem.align, parser.allocator)
-            expect(parser^, err == nil)
-	        underlying_id := info.elem.id
-            (^rawptr)(a.data)^ = ptr
-	        data := any{(^rawptr)(a.data)^, underlying_id}
-            deserialize_from_string(data, parser)
-
-
 
 		case reflect.Type_Info_Bit_Set:
 			if _, ok := reflect.type_info_base( type_info_of(info.elem.id) ).variant.(reflect.Type_Info_Enum); !ok {
@@ -527,19 +598,21 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			expect(parser^, token.kind == .Curly_Bracket_Open)
 
 			bit_data: u64 = 0
+			for parser.curr_token.kind != .Curly_Bracket_Close {
+				token := advance(parser)
+				expect(parser^, token.kind == .Dot, fmt.tprintf("Token = %v", token))
 
-			value_token := advance(parser)
-			expect(parser^, value_token.kind == .Stream || value_token.kind == .Curly_Bracket_Close, fmt.tprintf("Token = %v", token))
-
-			for value_token.kind != .Curly_Bracket_Close {
-				enum_value, ok := reflect.enum_from_name_any(info.elem.id, value_token.text)
+				token = advance(parser)
+				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+				enum_value, ok := reflect.enum_from_name_any(info.elem.id, token.text)
 				assert(ok)
 
 				u := cast(u64) enum_value // O que eu fui nerd aqui é brincadeira tá
 				bit_data |= 1 << u
 
-				value_token = advance(parser)
+				expect(parser^, advance(parser).kind == .Comma, fmt.tprintf("Token = %v", token))
 			}
+			expect(parser^, advance(parser).kind == .Curly_Bracket_Close)
 
 			bit_size := u64(8*ti.size)
 			switch bit_size {
@@ -561,41 +634,46 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			}
 
 		case reflect.Type_Info_Union:
-			token := advance(parser)
-			if token.text == "nil" do return
+			panic("Don't use unions please")
+			// token := advance(parser)
+			// if token.text == "nil" do return
 
-			expect(parser^, token.kind == .Parenthesis_Open)
+			// expect(parser^, token.kind == .Parenthesis_Open)
 
-			type_token := advance(parser)
-			expect(parser^, type_token.kind == .Stream, fmt.tprintf("Token = %v", token))
-			expect(parser^, advance(parser).kind == .Parenthesis_Close)
+			// type_token := advance(parser)
+			// expect(parser^, type_token.kind == .Stream, fmt.tprintf("Token = %v", token))
+			// expect(parser^, advance(parser).kind == .Parenthesis_Close)
 			
-			type_s := type_token.text
+			// type_s := type_token.text
 
-			expect(parser^, len(info.variants) > 1, "Union only has 1 variant")
+			// expect(parser^, len(info.variants) > 1, "Union only has 1 variant")
 
-			for variant, i in info.variants {
-				sb := strings.builder_make(context.temp_allocator)
-				reflect.write_type_builder(&sb, variant)
+			// for variant, i in info.variants {
+			// 	sb := strings.builder_make(context.temp_allocator)
+			// 	reflect.write_type_builder(&sb, variant)
 
-				variant_s := strings.to_string(sb)
-				if variant_s == type_s {
-					variant_any := any{a.data, variant.id}
-					deserialize_from_string(variant_any, parser)
+			// 	variant_s := strings.to_string(sb)
+			// 	if variant_s == type_s {
+			// 		variant_any := any{a.data, variant.id}
+			// 		deserialize_from_parser(variant_any, parser)
 
-					raw_tag := i
-					if !info.no_nil { raw_tag += 1 }
+			// 		raw_tag := i
+			// 		if !info.no_nil { raw_tag += 1 }
 
-					tag := any{rawptr(uintptr(a.data) + info.tag_offset), info.tag_type.id}
-					assign_int(tag, raw_tag)
+			// 		tag := any{rawptr(uintptr(a.data) + info.tag_offset), info.tag_type.id}
+			// 		assign_int(tag, raw_tag)
 
-					break
-				}
-			}
+			// 		break
+			// 	}
+			// }
+			// expect_comma = false
 			
 		case reflect.Type_Info_Enum:
 			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
+			expect(parser^, token.kind == .Dot, fmt.tprintf("Token = %v", token))
+
+			token = advance(parser)
+			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
 			found: bool
 			for name, i in info.names {
 				if name == token.text {
@@ -608,26 +686,22 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 
 		case reflect.Type_Info_String:
 			token := advance(parser)
-			expect(parser^, token.kind == .quote, fmt.tprintf("Token = %v"))
+			expect(parser^, token.kind == .Double_Quotes, fmt.tprintf("Token = %v", token))
 			token = advance(parser)
 			switch &dst in a {
 				case string:
 					dst = token.text
 				case cstring: panic("Deserialization of `cstring` is not supported!")
 			}
-			expect(parser^, advance(parser).kind == .quote, fmt.tprintf("Token = %v"))
+			token = advance(parser)
+			expect(parser^, token.kind == .Double_Quotes, fmt.tprintf("Token = %v", token))
 
 		case reflect.Type_Info_Struct:
 			token := advance(parser)
-			if token.kind == .Stream { // might be the struct's type
-				token = advance(parser)
-			}
-			expect(parser^, token.kind == .Curly_Bracket_Open)
-
-			token = advance(parser)
-			for token.kind != .Curly_Bracket_Close {
+			expect(parser^, token.kind == .Curly_Bracket_Open, fmt.tprintf("Token = %v", token))
+			for parser.curr_token.kind != .Curly_Bracket_Close {
+				token := advance(parser)
 				expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
-				expect(parser^, parser.curr_token.kind == .Colon)
 				key := token.text
 
 				found: bool
@@ -635,63 +709,35 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 					if field.name != key do continue
 
 					found = true
-					expect(parser^,  advance(parser).kind == .Colon )
-					if ok, err := contains_tag(field.tag, "no_serialize"); ok && err == nil {
-						token := advance(parser)
-						if token.kind == .Stream {
-							// Could be the type of a struct
-							if parser.curr_token.kind == .Curly_Bracket_Open {
-								token = advance(parser)
-								// Skip the whole thing
-								curly_bracket_stack_current := parser.curly_bracket_stack
-								for parser.curly_bracket_stack >= curly_bracket_stack_current {
-									advance(parser)
-								}
-							}
-						}
-						else if token.kind == .Curly_Bracket_Open {
-							// Skip the whole thing
-							curly_bracket_stack_current := parser.curly_bracket_stack
-							for parser.curly_bracket_stack >= curly_bracket_stack_current {
-								advance(parser)
-							}
-						}
-						else {
-							panic(fmt.tprintfln("Token = %v", token))
-						}
-					} else {
+					expect(parser^,  advance(parser).kind == .Assign)
+					if contains, err := contains_tag(field.tag, "no_serialize"); contains && err == nil {
+						// NOTE: This is only here in the case that you had a member who was being serialized
+						//       and then you added the "no_serialize" tag to it. Otherwise you would have to
+						//       re-serialize or manually remove the field which would be ass.
+						eat_value(parser)
+					} else if !contains {
 						data_ptr := rawptr( uintptr(a.data) + field.offset )
 						field_any := any{data_ptr, field.type.id}
-						deserialize_from_string(field_any, parser)
+						deserialize_from_parser(field_any, parser)
+					}
+					else {
+						panic(fmt.tprintfln("Error:", err))
 					}
 				}
 				expect(parser^, found, fmt.tprintf("Could not find field: %s for struct of type %v", key, a.id))
-				token = advance(parser)
 			}
+			expect(parser^, advance(parser).kind == .Curly_Bracket_Close, fmt.tprintf("Token = %v"))
 
 		case reflect.Type_Info_Boolean:
-			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
-			switch token.text {
-				case "true" : assign_bool(a, true )
-				case "false": assign_bool(a, false)
-				case        : panic( fmt.tprintfln("%s is not supported as a boolean value!", token.text) )
-			}
+			value := parse_boolean(parser)
+			assign_bool(a, value)
 			
 		case reflect.Type_Info_Integer:
-			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v"))
-			i, ok := strconv.parse_i128(token.text)
-			expect(parser^, ok, fmt.tprintfln("Could not convert: %s into an integer!", token.text))
+			i := parse_integer(parser)
 			assign_int(a, i)
 
 		case reflect.Type_Info_Float:
-			token := advance(parser)
-			expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
-			f, ok := strconv.parse_f64(token.text)
-			if !ok {
-				fmt.println("Failed to convert to float:", token.text)
-			}
+			f := parse_float(parser)
 			assign_float(a, f)
 
 		case reflect.Type_Info_Array:
@@ -700,10 +746,45 @@ deserialize_from_string :: proc(a: any, parser: ^Parser) {
 			for i in 0..<info.count {
 				elem_ptr := rawptr(uintptr(a.data) + uintptr(i) * uintptr(info.elem_size))
 				elem := any{elem_ptr, info.elem.id}
-				deserialize_from_string(elem, parser)
+				deserialize_from_parser(elem, parser)
 			}
 			expect(parser^, advance(parser).kind == .Curly_Bracket_Close)
 	}
+	if parser.curr_token.kind != .End { // `.End` only if this is the whole struct
+		token := advance(parser)
+		expect(parser^, token.kind == .Comma, fmt.tprintf("Token = %v", token))
+	}
+}
+
+eat_value :: proc(parser: ^Parser) {
+	token := advance(parser)
+	#partial switch token.kind {
+	case .Curly_Bracket_Open:
+		// Skip the whole thing
+		curly_bracket_stack_current := parser.curly_bracket_stack
+		for parser.curly_bracket_stack >= curly_bracket_stack_current {
+			advance(parser)
+		}
+	case .Parenthesis_Open:
+		panic("Don't use unions!!!!!!!")
+
+	case .Dot:
+		token := advance(parser)
+		expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+	case .Double_Quotes:
+		token := advance(parser)
+		expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+
+		token = advance(parser)
+		expect(parser^, token.kind == .Double_Quotes, fmt.tprintf("Token = %v", token))
+	case .Stream:
+		// Do nothing, we already "skipped" by the `advance` at the beginning
+		break
+		
+	case: panicf("Kind: %v", token.kind)
+	}
+	token = advance(parser)
+	expect(parser^, token.kind == .Comma)
 }
 
 Token_Kind :: enum {
@@ -715,12 +796,15 @@ Token_Kind :: enum {
 	Parenthesis_Open,
 	Parenthesis_Close,
 
-	Colon,
-
-	quote,
+	Assign,
+	Dot,
+	Comma,
+	Double_Quotes,
 	Stream,
+	Newline,
 	End,
 }
+ASSIGN_TOKEN :: '='
 
 Token :: struct {
 	kind : Token_Kind,
@@ -728,8 +812,10 @@ Token :: struct {
 	text : string,
 }
 
-Lexer :: struct {
+Tokenizer :: struct {
 	data  : string,
+	filepath: string,
+
 	cursor: int,
 	tokens: [dynamic]Token,
 
@@ -739,25 +825,25 @@ Lexer :: struct {
 Parser :: struct {
 	curly_bracket_stack: int,
 	cursor: int,
-	lexer: Lexer,
+	t: Tokenizer,
 	curr_token: Token,
 	allocator: mem.Allocator,
 	path: string,
 }
 
-line_of :: proc(lexer: Lexer, index: int) -> (n: int) {
+line_of :: proc(t: Tokenizer, index: int) -> (n: int) {
 	n += 1 // NOTE: Line starts at 1 not 0
 	for i in 0..<index {
-		if lexer.data[i] == '\n' do n += 1
+		if t.data[i] == '\n' do n += 1
 	}
 	return
 }
 
-grab_line :: proc(lexer: Lexer, index: int) -> string {
+grab_line :: proc(t: Tokenizer, index: int) -> string {
 	i := index
 	start: int
 	for i > -1 {
-		if lexer.data[i] == '\n' {
+		if t.data[i] == '\n' {
 			start = i+1
 			break
 		}
@@ -765,26 +851,36 @@ grab_line :: proc(lexer: Lexer, index: int) -> string {
 	}
 
 	i = index
-	end := len(lexer.data)
-	for i < len(lexer.data) {
-		if lexer.data[i] == '\n' {
+	end := len(t.data)
+	for i < len(t.data) {
+		if t.data[i] == '\n' {
 			end = i
 			break
 		}
 		i += 1
 	}
 
-	return string(lexer.data[start:end])
+	return string(t.data[start:end])
+}
+
+tokenizer_error :: proc(t: Tokenizer, message: string) {
+	source_file_index := t.cursor-1
+	fmt.print(ERROR+": "); fmt.println(message)
+	fmt.printfln("File `%v` at line `%v`:\n%v",
+				 t.filepath,
+				 line_of(t, source_file_index), // NOTE: `line_of` and `grab_line` are subpar quality
+				 grab_line(t, source_file_index))
+	os.exit(1)
 }
 
 expect :: proc(parser: Parser, condition: bool, message: string = "", loc := #caller_location, expr := #caller_expression(condition)) {
 	if !condition {
-		source_file_index := parser.lexer.tokens[parser.cursor-1].start
+		source_file_index := parser.t.tokens[parser.cursor-1].start
 		fmt.printfln(ERROR + " at %v:", loc)
 		fmt.printfln("Failed to parse file `%v` at line `%v`:\n%v",
 					 parser.path,
-					 line_of(parser.lexer, source_file_index), // NOTE: `line_of` and `grab_line` are subpar quality
-					 grab_line(parser.lexer, source_file_index))
+					 line_of(parser.t, source_file_index), // NOTE: `line_of` and `grab_line` are subpar quality
+					 grab_line(parser.t, source_file_index))
 
 		fmt.printf("Parser expects that `%v`, ", expr)
 		if message == "" do fmt.println("but that was not the case!")
@@ -793,10 +889,10 @@ expect :: proc(parser: Parser, condition: bool, message: string = "", loc := #ca
 	}
 }
 
-parser_make :: proc(lexer: Lexer, path: string, allocator: mem.Allocator) -> Parser {
+parser_make :: proc(t: Tokenizer, path: string, allocator: mem.Allocator) -> Parser {
 	parser: Parser
-	parser.lexer = lexer
-	parser.curr_token = parser.lexer.tokens[parser.cursor]
+	parser.t = t
+	parser.curr_token = parser.t.tokens[parser.cursor]
 	parser.path = path
 	parser.allocator = allocator
 	return parser
@@ -809,20 +905,20 @@ advance :: proc(parser: ^Parser) -> Token {
 	else if token.kind == .Curly_Bracket_Close do parser.curly_bracket_stack -= 1
 
 	parser.cursor += 1
-	parser.curr_token = parser.lexer.tokens[parser.cursor]
+	parser.curr_token = parser.t.tokens[parser.cursor]
 
 	return token
 }
 
-lexer_make :: proc(data: string) -> Lexer {
-	lexer: Lexer
-	lexer.data = data
-	lexer.tokens = make([dynamic]Token, context.temp_allocator)
-	return lexer
+tokenizer_make :: proc(path: string, data: string) -> Tokenizer {
+	t: Tokenizer
+	t.data = data
+	t.filepath = path
+	t.tokens = make([dynamic]Token, context.temp_allocator)
+	return t
 }
 
-
-grab_stream :: proc(lexer: ^Lexer) -> string {
+grab_stream :: proc(t: ^Tokenizer) -> string {
 	is_inside_array :: proc(chars: []u8, char: u8) -> bool {
 		for c in chars {
 			if c == char do return true
@@ -830,102 +926,137 @@ grab_stream :: proc(lexer: ^Lexer) -> string {
 		return false
 	}
 
-	start := lexer.cursor
+	start := t.cursor
 	characters_to_sentry: []u8
-	if !lexer.is_inside_string {
-		characters_to_sentry = []u8{' ', '\t', '\n', '{', '}', '[', ']', '(', ')', ':', '#'}
+	if !t.is_inside_string {
+		characters_to_sentry = []u8{' ', '\t', '\n', '{', '}', '[', ']', '(', ')', '=', '#', ','}
 	}
 	else {
 		characters_to_sentry = []u8{'"', '\n'}
 	}
-	// TODO: If I serialize a string with '\n' it is all fucked
-	loop: for lexer.cursor < len(lexer.data) {
-		if is_inside_array(characters_to_sentry, lexer.data[lexer.cursor]) {
+	loop: for t.cursor < len(t.data) {
+		if is_inside_array(characters_to_sentry, t.data[t.cursor]) {
 			break loop
 		}
 		else {
-			lexer.cursor += 1
+			t.cursor += 1
 		}
 	}
-	stream := lexer.data[start:lexer.cursor]
+	stream := t.data[start:t.cursor]
 	return stream
 }
 
-lex :: proc(lexer: ^Lexer) {
-	for lexer.cursor < len(lexer.data) {
+tokenize :: proc(t: ^Tokenizer) {
+	for t.cursor < len(t.data) {
 		found := true
 		token: Token
-		token.start = lexer.cursor
-		switch lexer.data[lexer.cursor] {
-			case ' ', '\t', '\n': lexer.cursor += 1; found = false
+		token.start = t.cursor
+		switch t.data[t.cursor] {
+			case ' ', '\t': t.cursor += 1; found = false
 
 			case '#':
-				lexer.cursor += 1
-				next_byte := lexer.data[lexer.cursor]
 				found = false
-				if next_byte == '=' {
-					// Multi-line comment (Currently it cannot be nested)
-					lexer.cursor += 1
-					for lexer.cursor < len(lexer.data) {
-						if lexer.data[lexer.cursor] == '=' && lexer.data[lexer.cursor+1] == '#' {
-							lexer.cursor += 2
-							break
+				cursor := t.cursor+1
+				if cursor < len(t.data) {
+					next_byte := t.data[cursor]
+					if next_byte == '=' { // Multi-line
+						comment_stack := 1
+						cursor += 1
+						for comment_stack > 0 {
+							if cursor >= len(t.data)-2 {
+								tokenizer_error(t^, "Forgot to close multi-line comment")
+							}
+							if string(t.data[cursor:cursor+2]) == "=#" {
+								comment_stack -= 1
+								cursor += 1
+							}
+							else if string(t.data[cursor:cursor+2]) == "#=" {
+								comment_stack += 1
+								cursor += 1
+							}
+							cursor += 1
 						}
-						lexer.cursor += 1
 					}
-					if lexer.cursor == len(lexer.data) do panic("Ya forgot to close the multi-line comment ya dumbass")
-				} else {
-					// Single line comment
-					for lexer.data[lexer.cursor] != '\n' do lexer.cursor += 1
+					else {
+						for cursor < len(t.data) && t.data[cursor] != '\n' do cursor += 1
+					}
 				}
+				t.cursor = cursor
+
+			case '\n':
+				if t.is_inside_string {
+					tokenizer_error(t^, "Forgot to close string literal")
+				}
+				found = false
+				t.cursor += 1
 
 			case '{':
 				token.kind = .Curly_Bracket_Open
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
 
 			case '}':
 				token.kind = .Curly_Bracket_Close
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
 
 			case '(':
 				token.kind = .Parenthesis_Open
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
 
 			case ')':
 				token.kind = .Parenthesis_Close
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
 
-			case ':':
-				token.kind = .Colon
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
+			case '=':
+				token.kind = .Assign
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
+
+			case '.':
+				token.kind = .Dot
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
+
+			case ',':
+				token.kind = .Comma
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
 
 			case '"':
-				token.kind = .quote
-				token.text = string(lexer.data[lexer.cursor:lexer.cursor+1])
-				lexer.cursor += 1
-				lexer.is_inside_string = !lexer.is_inside_string
+				token.kind = .Double_Quotes
+				token.text = string(t.data[t.cursor:t.cursor+1])
+				t.cursor += 1
+				t.is_inside_string = !t.is_inside_string
+
+			case '\\':
+				assert(t.is_inside_string)
+				scan_escape(t)
+				t.cursor += 1
 
 			case: // Grab the value
-				token.text  = grab_stream(lexer)
+				token.text  = grab_stream(t)
 				token.kind  = .Stream
 		}
 
 		if found {
-			append(&lexer.tokens, token)
+			append(&t.tokens, token)
 		}
 	}
-	append(&lexer.tokens, Token{.End, lexer.cursor, ""})
+	append(&t.tokens, Token{.End, t.cursor, ""})
+}
+
+scan_escape :: proc(t: ^Tokenizer) {
+	t.cursor += 1
+	panicf("We are not prepared for this type of advanced technology: %v", t.data[t.cursor])
 }
 
 @(private="file")
 bytes_make :: proc(size, alignment: int, allocator: mem.Allocator, loc := #caller_location) -> []byte {
-	b, berr := mem.alloc_bytes(size, alignment, allocator, loc)
-	assert(berr == nil)
+	b, err := mem.alloc_bytes(size, alignment, allocator, loc)
+	assert(err == nil)
 	return b
 }
 
@@ -945,20 +1076,17 @@ should_indent :: #force_inline proc(sb: ^strings.Builder) -> bool {
 
 @(private="file")
 serialize_slice :: proc(sb: ^strings.Builder, indentation: int, base: rawptr,
-						element_info: ^reflect.Type_Info, length: int)
+						element_info: ^reflect.Type_Info, length: int, config: Serializer_Config)
 {
 	if length == 0 {
 		strings.write_string(sb, "nil")
 	}
 	else {
-		strings.write_byte(sb, '(')
-		strings.write_int(sb, int(length))
-		strings.write_byte(sb, ')')
 		strings.write_byte(sb, '{')
 		strings.write_byte(sb, '\n')
 		for i in 0..<length {
 			data := uintptr(base) + uintptr(i*element_info.size)
-			serialize_to_builder(any{rawptr(data), element_info.id}, sb, indentation+4)
+			serialize_to_builder_any(any{rawptr(data), element_info.id}, sb, indentation+4, config)
 		}
 		indent_pls(sb, indentation)
 		strings.write_byte(sb, '}')
@@ -970,6 +1098,61 @@ assign_array :: proc(base: rawptr, elem: ^reflect.Type_Info, length: uintptr, pa
 	for idx: uintptr = 0; idx < length; idx += 1 {
 		elem_ptr := rawptr(uintptr(base) + idx*uintptr(elem.size))
 		elem := any{elem_ptr, elem.id}
-		deserialize_from_string(elem, parser)
+		deserialize_from_parser(elem, parser)
 	}
 }
+
+@(private)
+contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> (ok: bool, err: mem.Allocator_Error) {
+	tags := strings.split(string(struct_tags), " ", context.temp_allocator) or_return
+	for t in tags {
+		if t == tag_name do return true, nil
+	}
+	return false, nil
+}
+
+// @parsing
+@(private)
+count_number_of_elements_in_slice :: proc(parser: ^Parser, elem: ^reflect.Type_Info) -> (res:int) { // Bad, would like to dettach the parser from the serder, but this is good for now
+	snapshot := parser^
+	any_any_data := bytes_make(elem.size*1, elem.align, context.temp_allocator)
+	any_any := any{raw_data(any_any_data), elem.id}
+	for snapshot.curr_token.kind != .Curly_Bracket_Close && snapshot.curr_token.kind != .End {
+		deserialize_from_parser(any_any, &snapshot) // parse slice item
+		res += 1
+	}
+	expect(snapshot, advance(&snapshot).kind == .Curly_Bracket_Close)
+	return
+}
+
+@(private)
+parse_boolean :: proc(parser: ^Parser, loc := #caller_location) -> (res:bool) {
+	token := advance(parser)
+	expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+	switch token.text {
+		case "true" : res = true
+		case "false": res = false
+		case        : panic( fmt.tprintfln("%s is not supported as a boolean value!", token.text) )
+	}
+	return
+}
+
+@(private)
+parse_integer :: proc(parser: ^Parser, loc := #caller_location) -> i128 {
+	token := advance(parser)
+	expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+	i, ok := strconv.parse_i128(token.text)
+	expect(parser^, ok, fmt.tprintfln("Could not convert: %s into an integer!", token.text))
+	return i
+}
+
+@(private)
+parse_float :: proc(parser: ^Parser, loc := #caller_location) -> f64 {
+	token := advance(parser)
+	expect(parser^, token.kind == .Stream, fmt.tprintf("Token = %v", token))
+	f, ok := strconv.parse_f64(token.text)
+	expect(parser^, ok, fmt.tprintfln("Could not convert: %s into a float!", token.text))
+	return f
+}
+
+base_10_digits := "0123456789"
