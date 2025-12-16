@@ -7,11 +7,10 @@ SOA_Static :: struct($T: typeid, $N: int) {
 	items: #soa[N]T,
 }
 
-soa_static_append :: proc(batch: ^SOA_Static($T, $N), item: T, loc := #caller_location) -> ^T {
+soa_static_append :: proc(batch: ^SOA_Static($T, $N), item: T, loc := #caller_location) {
 	assert(batch.len < N, loc=loc)
 	batch.items[batch.len] = item
 	batch.len += 1
-	return
 }
 
 soa_static_alloc_item :: proc(batch: ^SOA_Static($T, $N), loc := #caller_location) -> (res:^T) {
@@ -26,11 +25,11 @@ soa_static_clear :: proc(batch: ^SOA_Static($T, $N)) {
 	batch.len = 0
 }
 
-soa_static_slice :: proc(batch: ^SOA_Static($T, $N)) -> []T {
+soa_static_slice :: proc(batch: ^SOA_Static($T, $N)) -> #soa []T {
 	return batch.items[:batch.len]
 }
 
-soa_static_slice_inactives :: proc(batch: ^SOA_Static($T, $N)) -> []T {
+soa_static_slice_inactives :: proc(batch: ^SOA_Static($T, $N)) -> #soa []T {
 	return batch.items[batch.len:]
 }
 
@@ -86,7 +85,7 @@ soa_dynamic_slice :: proc(batch: ^SOA_Dynamic($T)) -> #soa[]T {
 	return batch.items[:batch.len]
 }
 
-soa_dynamic_slice_inactives :: proc(batch: ^SOA_Dynamic($T)) -> []T {
+soa_dynamic_slice_inactives :: proc(batch: ^SOA_Dynamic($T)) -> #soa []T {
 	return batch.items[batch.len:]
 }
 
