@@ -11,7 +11,8 @@ import    "vendor:glfw"
 
 import mm  "../../my_math"
 
-Texture :: rl.Texture
+Texture   :: rl.Texture
+Texture2D :: Texture
 Font    :: rl.Font
 
 font_default :: proc() -> Font {
@@ -77,6 +78,21 @@ load_texture_from_memory :: proc(memory: []byte) -> Texture {
 	return tex
 }
 
+image_to_raylib_image :: proc(img: Image) -> (res:rl.Image) {
+	res.data   = img.data
+	res.width  = img.width
+	res.height = img.width
+	res.mipmaps = 1
+	#partial switch img.format {
+	case .RGB8   : res.format = .UNCOMPRESSED_R8G8B8
+	case .RGBA8 : res.format = .UNCOMPRESSED_R8G8B8A8
+	case .R8: res.format = .UNCOMPRESSED_GRAYSCALE
+	case:
+		assert(false, "Eitapreula")
+	}
+	return
+}
+
 raylib_image_to_image :: proc(rlimg: rl.Image) -> (res:Image) {
 	res.data   = rlimg.data
 	res.width  = rlimg.width
@@ -91,9 +107,14 @@ raylib_image_to_image :: proc(rlimg: rl.Image) -> (res:Image) {
 	return
 }
 
+
 load_image :: proc(path: string) -> Image {
 	rlimg := rl.LoadImage( cstring(raw_data(path)) )
 	return raylib_image_to_image(rlimg)
+}
+
+_unload_image :: proc(img: Image) {
+	rl.UnloadImage(image_to_raylib_image(img))
 }
 
 _load_image_from_texture :: proc(texture: Texture) -> Image {
@@ -105,7 +126,23 @@ load_font :: proc(path: string) -> Font {
 	return rl.LoadFont( cstring(raw_data(path)) )
 }
 
-load_shader :: proc(vertex_path, fragment_path: cstring) -> Shader {
+_load_shader_from_memory :: proc(vertex_data, fragment_data: []u8) -> Shader {
+	vx_cstr: cstring = nil
+	if vertex_data != nil {
+		vx_data := make([]u8, len(vertex_data)+1, context.temp_allocator)
+		n := copy_slice(vx_data, vertex_data)
+		vx_cstr = cstring(&vx_data[0])
+	}
+	fg_cstr: cstring = nil
+	if fragment_data != nil {
+		fg_data := make([]u8, len(fragment_data)+1, context.temp_allocator)
+		n := copy_slice(fg_data, fragment_data)
+		fg_cstr = cstring(&fg_data[0])
+	}
+	return rl.LoadShaderFromMemory(vx_cstr, fg_cstr)
+}
+
+_load_shader_from_path :: proc(vertex_path, fragment_path: cstring) -> Shader {
 	return rl.LoadShader(vertex_path, fragment_path)
 }
 
@@ -142,16 +179,15 @@ stencil_mask_end :: proc() {
 	gl.StencilFunc(gl.EQUAL, 1, 0xFF)
 }
 
-draw_text_f32 :: proc(font: Font, text: cstring, x, y: f32, font_size: i32, color: Color) {
-	rl.DrawTextEx(font, text, rl.Vector2{x, y}, f32(font_size), 1.0, to_raylib_color(color))
+draw_text_f32 :: proc(font: Font, text: cstring, x, y: f32, font_size: f32, color: Color) {
+	rl.DrawTextEx(font, text, rl.Vector2{x, y}, font_size, 1.0, to_raylib_color(color))
 }
-draw_text_v2 :: proc(font: Font, text: cstring, pos: [2]f32, font_size: i32, color: Color) {
-	rl.DrawTextEx(font, text, pos, f32(font_size), 1.0, to_raylib_color(color))
+draw_text_v2 :: proc(font: Font, text: cstring, pos: [2]f32, font_size: f32, color: Color) {
+	rl.DrawTextEx(font, text, pos, font_size, 1.0, to_raylib_color(color))
 }
-draw_text :: proc{draw_text_f32,draw_text_v2}
 
-draw_text_by_center :: proc(font: Font, text: cstring, center: [2]f32, font_size: i32, color: Color, rotation: f32 = 0.0, scale: f32 = 1.0) {
-	text_size := get_text_size(font, text, f32(font_size))
+draw_text_by_center :: proc(font: Font, text: cstring, center: [2]f32, font_size: f32, color: Color, rotation: f32 = 0.0, scale: f32 = 1.0) {
+	text_size := get_text_size(font, text, font_size)
 
 	half_width  := text_size.x * 0.5 * scale
 	half_height := text_size.y * 0.5 * scale
@@ -256,7 +292,18 @@ draw_multi_texture_by_center :: proc(multi_texture: Multi_Texture, #any_int inde
 }
 
 _draw_rectangle :: #force_inline proc "contextless" (x, y, w, h: f32, color: Color) {
-	rl.DrawRectangleV(rl.Vector2{x,y}, rl.Vector2{w,h}, to_raylib_color(color))
+	pos := [2]f32{x,y}
+	size := [2]f32{w,h}
+
+	if size.x < 0 {
+		size.x = abs(size.x)
+		pos.x -= size.x
+	}
+	if size.y < 0 {
+		size.y = abs(size.y)
+		pos.y -= size.y
+	}
+	rl.DrawRectangleV(pos, size, to_raylib_color(color))
 }
 
 draw_rectangle_by_center :: proc(center: mm.V2, w, h: f32, color: Color) {
@@ -301,12 +348,27 @@ draw_rectangle_lines :: proc(pos, size: mm.V2, thick: f32, color: Color) {
 }
 
 draw_circle_f32 :: proc(x, y, radius: f32, color: Color) {
-	rl.DrawCircleV({x,y}, radius, to_raylib_color(color))
+	_draw_circle({x,y}, radius, to_raylib_color(color))
 }
 draw_circle_v2 :: proc(center: mm.V2, radius: f32, color: Color) {
-	rl.DrawCircleV(center, radius, to_raylib_color(color))
+	_draw_circle(center, radius, to_raylib_color(color))
 }
 draw_circle :: proc{draw_circle_f32,draw_circle_v2}
+
+_draw_circle :: proc(center: [2]f32, radius: f32, color: rl.Color) {
+	rl.BeginShaderMode(g_circle_shader)
+	_draw_circle_quad(center, radius, color)
+	rl.EndShaderMode()
+}
+draw_circle_quad :: proc(center: [2]f32, radius: f32, color: Color) {
+	_draw_circle_quad(center, radius, to_raylib_color(color))
+}
+_draw_circle_quad :: proc(center: [2]f32, radius: f32, color: rl.Color) {
+	top_left := center-radius
+	rl.BeginShaderMode(g_circle_shader)
+	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {top_left.x, top_left.y, radius*2, radius*2}, {0,0}, 0, color)
+	rl.EndShaderMode()
+}
 
 to_raylib_color :: #force_inline proc "contextless" (color: Color) -> rl.Color {
 	return {
@@ -372,4 +434,34 @@ texture_width :: proc(texture: Texture) -> i32 {
 
 texture_height :: proc(texture: Texture) -> i32 {
 	return texture.height
+}
+
+g_quad_texture: Texture
+g_circle_shader: Shader
+_init :: proc() {
+	img := rl.GenImageColor(1, 1, rl.WHITE)
+	defer rl.UnloadImage(img)
+	g_quad_texture = rl.LoadTextureFromImage(img)
+	
+	circle_shader :: `
+	#version 410
+
+	in vec2 fragTexCoord;
+	in vec4 fragColor;
+
+	out vec4 finalColor;
+
+	float circle(vec2 uv, vec2 center, float radius) {
+		return step(length(uv-center), radius);
+	}
+
+	void main() {
+		const vec2 center = vec2(0.5);
+		vec2 uv = fragTexCoord;
+		float c = circle(uv, center, 0.5);
+		finalColor = c*fragColor;
+	}
+	`
+
+	g_circle_shader = rl.LoadShaderFromMemory(nil, circle_shader)
 }

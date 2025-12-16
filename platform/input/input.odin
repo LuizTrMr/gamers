@@ -106,64 +106,104 @@ Mouse_Button :: enum i32 {
 	right,
 }
 
+Game_Input_Button :: union {
+	Key,
+	Mouse_Button,
+}
+
+key_game_button :: proc(key: Key) -> Game_Input_Button {
+	return key
+}
+
+mouse_game_button :: proc(mouse_button: Mouse_Button) -> Game_Input_Button {
+	return mouse_button
+}
+
 process_key :: proc(key: Key) -> (state: State) {
-	state.is_pressed = is_key_pressed(key)
-	state.is_down    = is_key_down(key)
+	state.is_pressed = _is_key_pressed(key)
+	state.is_down    = _is_key_down(key)
 	return
 }
 
 process_keys :: proc(keys: []Key) -> (state: State) {
 	for key in keys {
-		if is_key_pressed(key) do state.is_pressed = true
-		if is_key_down(key)    do state.is_down = true
+		if _is_key_pressed(key) do state.is_pressed = true
+		if _is_key_down(key)    do state.is_down = true
 	}
 	return
 }
 
 process_mouse_button :: proc(button: Mouse_Button) -> (state: State) {
-	state.is_pressed = is_mouse_button_pressed(button)
-	state.is_down    = is_mouse_button_down(button)
+	state.is_down     = _is_mouse_button_down(button)
+	state.is_up       = !state.is_down
+	state.is_pressed  = _is_mouse_button_pressed(button)
+	state.is_released = _is_mouse_button_released(button)
 	return
 }
 
 State :: struct {
-	is_pressed: bool,
-	is_down   : bool,
+	is_pressed : bool,
+	is_released: bool,
+	is_down    : bool,
+	is_up      : bool,
 }
-key_to_state: #sparse [Key]State
 
-
-Key_Info :: struct {
+Button_Info :: struct {
 	was_down: bool,
 	half_transitions: u8,
 }
 
-ctx_is_key_pressed :: proc(ctx: ^Context, key: Key) -> bool {
-	return input_state_from_key_info(ctx.keys.info[key]).is_pressed
+is_mouse_button_pressed :: proc(ctx: ^Context, btn: Mouse_Button) -> bool {
+	return input_state_from_button_info(ctx.mouse.info[btn]).is_pressed
+}
+is_mouse_button_down :: proc(ctx: ^Context, btn: Mouse_Button) -> bool {
+	return input_state_from_button_info(ctx.mouse.info[btn]).is_down
+}
+is_mouse_button_released :: proc(ctx: ^Context, btn: Mouse_Button) -> bool {
+	return input_state_from_button_info(ctx.mouse.info[btn]).is_released
 }
 
-ctx_is_key_down :: proc(ctx: ^Context, key: Key) -> bool {
-	return input_state_from_key_info(ctx.keys.info[key]).is_down
+is_key_pressed :: proc(ctx: ^Context, key: Key) -> bool {
+	return input_state_from_button_info(ctx.keys.info[key]).is_pressed
 }
 
-input_state_from_key_info :: proc(info: Key_Info) -> (res:State) {
+is_key_down :: proc(ctx: ^Context, key: Key) -> bool {
+	return input_state_from_button_info(ctx.keys.info[key]).is_down
+}
+
+input_state_from_button_info :: proc(info: Button_Info) -> (res:State) {
 	res.is_down    = info.was_down
+	res.is_up      = !res.is_down
 	res.is_pressed = (info.was_down  && info.half_transitions >= 1) ||
 					 (!info.was_down && info.half_transitions >= 2)
+	res.is_released = !info.was_down && info.half_transitions >= 1
 	return
 }
 
 // TODO: Don't ship this, jszus
 Context :: struct {
 	keys: struct {
-		info: #sparse [Key]Key_Info,
+		info: #sparse [Key]Button_Info,
+	},
+	mouse: struct {
+		info: [Mouse_Button]Button_Info,
 	},
 }
 
 poll_events_accumulate :: proc(ctx: ^Context) {
 	for key in Key {
 		info := &ctx.keys.info[key]
-		is_down := is_key_down(key)
+		is_down := _is_key_down(key)
+		transitioned := info.was_down != is_down
+		if transitioned {
+			info.half_transitions += 1
+		}
+		info.was_down = is_down
+	}
+
+	for btn in Mouse_Button {
+		info := &ctx.mouse.info[btn]
+		is_down := _is_mouse_button_down(btn)
 		transitioned := info.was_down != is_down
 		if transitioned {
 			info.half_transitions += 1
@@ -175,5 +215,8 @@ poll_events_accumulate :: proc(ctx: ^Context) {
 poll_events_reset :: proc(ctx: ^Context) {
 	for key in Key {
 		ctx.keys.info[key].half_transitions = 0
+	}
+	for btn in Mouse_Button {
+		ctx.mouse.info[btn].half_transitions = 0
 	}
 }

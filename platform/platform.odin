@@ -1,6 +1,6 @@
 package platform
 
-import "core:os"
+import os "core:os/os2"
 
 PLATFORM :: #config(PLATFORM, "RAYLIB")
 #assert(PLATFORM == "RAYLIB" || PLATFORM == "WEB")
@@ -22,6 +22,14 @@ get_frame_duration :: proc() -> f32 {
 	return _get_frame_duration()
 }
 
-open :: proc(path: string) -> (os.Handle, os.Error) {
+open :: proc(path: string) -> (^os.File, os.Error) {
 	return _open_simple(path)
+}
+
+create_package :: proc(name: string, identifier: string, version_first, version_second, version_third: int) {
+	_create_package(name, identifier, version_first, version_second, version_third)
+}
+
+copy_file_from_to :: proc(from, to: string) {
+	_copy_file_from_to(from, to)
 }

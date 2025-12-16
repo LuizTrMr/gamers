@@ -23,6 +23,7 @@ RED        :: Color{0.901, 0.160, 0.215, 1.0}
 PURPLE     :: Color{0.501, 0    , 0.501, 1.0}
 ORANGE     :: Color{1.0  , 0.498, 0.313, 1.0}
 BROWN      :: Color{0.550, 0.270, 0.070, 1.0}
+GRAY       :: Color{0.5  , 0.5  , 0.5  , 1.0}
 EDITOR     :: Color{0.561, 0.788, 0.949, 1.0}
 
 DEBUG_COLOR :: Color{0.325, 0.498, 0.901, 1.0}
@@ -322,6 +323,19 @@ draw_lines :: proc(points: []mm.V2, thick: f32, color: Color) {
 	}
 }
 
+draw_lines_of_text :: proc(font: Font, lines: []cstring, start: [2]f32, font_size: f32, color: Color) -> f32 {
+	curr := start
+	total: f32
+	for text in lines {
+		size := get_text_size(font, text, auto_cast font_size)
+		draw_text(font, text, curr, font_size, color)
+		curr.y += size.y
+		total += size.y
+	}
+	return total
+}
+draw_text :: proc{draw_text_f32,draw_text_v2}
+
 Pivot :: enum {
 	top_left,
 	top_center,
@@ -455,6 +469,18 @@ Pixel_Data_Format :: enum {
 	RGB8,
 	R8,
 }
+n_channels_from_image :: proc(image: Image) -> (res:i32) {
+	switch image.format {
+	case .RGBA8: res = 4
+	case .RGB8 : res = 3
+	case .R8   : res = 1
+	}
+	return
+}
+
+unload_image :: proc(img: Image) {
+	_unload_image(img)
+}
 
 load_image_from_texture :: proc(texture: Texture) -> Image {
 	return _load_image_from_texture(texture)
@@ -467,3 +493,13 @@ Option :: enum {
 set_mouse_cursor :: proc(opt: Option) {
 	_set_mouse_cursor(opt)
 }
+
+init :: proc() {
+	_init()
+}
+
+zero_texture: Texture
+
+load_shader_from_memory :: #force_inline proc(vx_data, fg_data: []u8) -> Shader { return _load_shader_from_memory(vx_data, fg_data) }
+load_shader_from_path   :: #force_inline proc(vx_path, fg_path: cstring) -> Shader { return _load_shader_from_path(vx_path, fg_path) }
+load_shader :: proc{load_shader_from_memory, load_shader_from_path}
