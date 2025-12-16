@@ -10,9 +10,14 @@ import "core:math/rand"
 
 PI  :: math.PI
 TAU :: math.TAU
+HALF_PI :: 1.5707963705062866 // Source: https://stdlib.io/docs/api/latest/@stdlib/constants/float32/half-pi
+
+RADIAN :: math.RAD_PER_DEG
 
 to_degrees :: math.to_degrees_f32
 to_radians :: math.to_radians_f32
+cos        :: math.cos
+sin        :: math.sin
 mod        :: math.mod
 sqrt       :: math.sqrt
 floor      :: math.floor
@@ -60,6 +65,21 @@ array_cast    :: linalg.array_cast
 smallest_angle_between :: linalg.angle_between
 orthogonal             :: linalg.orthogonal
 
+v2_signs :: proc (v: V2) -> (res:V2) {
+	// 0 if +, 1 if -
+	when ODIN_ENDIAN == .Little {
+		signx := transmute(u32)(v.x) >> 31
+		signy := transmute(u32)(v.y) >> 31
+	}
+	else {
+		signx := transmute(u32)(v.x) & 1
+		signy := transmute(u32)(v.y) & 1
+	}
+	if v.x != 0 do res.x = 1 - f32(signx*2)
+	if v.y != 0 do res.y = 1 - f32(signy*2)
+	return
+}
+
 @(deprecated="`angle_between` is deprecated, use `smallest_angle_between` instead")
 angle_between :: linalg.angle_between
 
@@ -73,6 +93,10 @@ V2_UP    :: UP
 V2_RIGHT :: RIGHT
 V2_DOWN  :: DOWN
 V2_LEFT  :: LEFT
+
+Direction :: enum {
+	up, right, down, left,
+}
 
 from_to :: #force_inline proc "contextless" (from, to: V2) -> V2 {
 	return to-from
@@ -122,6 +146,11 @@ is_near_v2 :: proc "contextless" (a, b: V2, radius: f32) -> bool {
 	return length2(b-a) <= radius*radius
 }
 is_near :: proc{is_near_f32, is_near_v2}
+
+v2_components_are_equal :: proc(to_test, fixed: V2) -> bool {
+	return is_near_f32(fixed.x, to_test.x, 0.001) && is_near_f32(fixed.y, to_test.y, 0.001)
+}
+
 
 sample_point_inside_rect :: proc(bound_a, bound_b: V2) -> (result: V2) {
 	result.x = rand.float32_range(bound_a.x, bound_b.x)
@@ -410,15 +439,15 @@ lerp_f32 :: proc "contextless" (a, b: f32, t: f32) -> f32 {
 	return a + (b-a)*t
 }
 
-lerp_v2 :: proc "contextless" (a, b: V2, t: f32) -> V2 {
+lerp_generic_f32 :: proc "contextless" (a, b: $T, t: f32) -> T {
 	return a + (b-a)*t
 }
 
-lerp_generic :: proc "contextless" (a, b: $T, t: f32) -> T {
+lerp_generic_f64 :: proc "contextless" (a, b: $T, t: f64) -> T {
 	return a + (b-a)*t
 }
 
-lerp :: proc{lerp_i32, lerp_f32, lerp_v2, lerp_generic}
+lerp :: proc{lerp_i32, lerp_f32, lerp_generic_f32, lerp_generic_f64}
 
 cubic_in :: proc "contextless" (t: f32) -> f32 {
 	return t * t * t
@@ -531,6 +560,10 @@ out_of_bounds :: proc "contextless" (object, bounds: Bounds) -> bool {
 	   	   object.start.y > bounds.end.y  
 }
 
+size_from_ints :: proc "contextless" (#any_int x: i32, #any_int y: i32) -> V2 {
+	return {f32(x),f32(y)}
+}
+
 clockwise_points_from_bounds :: proc(bounds: Bounds) -> (p0, p1, p2, p3: V2) {
 	size := bounds_size(bounds)
 	p0 = bounds.start
@@ -560,6 +593,15 @@ is_point_inside_polygon :: proc(points: []V2, point: V2, raycast: V2) -> bool {
 	}
 	count += cast(int)line_line_intersection(points[len(points)-1], points[0], raycast_start, raycast_end)
 	return count % 2 != 0
+}
+
+is_point_inside_circle_slice :: proc(p: V2, c: V2, radius: f32, direction: V2, spread: f32) -> bool {
+	if length2(p-c) >= radius*radius do return false
+
+	p_dir := normalize(p-c)
+	cos_p := dot(direction, p_dir) // (-1,1)
+	cos_spread := cos(spread*0.5)
+	return cos_p > cos_spread
 }
 
 // @Random
