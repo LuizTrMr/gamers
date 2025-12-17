@@ -912,7 +912,8 @@ advance :: proc(parser: ^Parser) -> Token {
 
 tokenizer_make :: proc(path: string, data: string) -> Tokenizer {
 	t: Tokenizer
-	t.data = data
+	replaced, was_allocation := strings.replace_all(data, "\r\n", "\n", context.temp_allocator)
+	t.data = replaced
 	t.filepath = path
 	t.tokens = make([dynamic]Token, context.temp_allocator)
 	return t
