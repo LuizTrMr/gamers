@@ -350,12 +350,6 @@ Pivot :: enum {
 	bottom_right,
 }
 
-Camera2D :: struct {
-	position: mm.V2,
-	zoom    : f32,
-	target  : mm.V2,
-}
-
 camera2d_begin :: #force_inline proc(camera: Camera2D) {
 	assert(camera.zoom != 0)
 	_camera2d_begin(camera)
@@ -365,15 +359,15 @@ camera2d_end :: #force_inline proc() {
 	_camera2d_end()
 }
 
-camera2d_make :: proc(target: mm.V2 = 0, position: mm.V2 = 0) -> (res:Camera2D) {
+camera2d_make :: proc(target: [2]f32 = 0, screen_size: [2]f32) -> (res:Camera2D) {
 	res.zoom   = 1
 	res.target = target
-	res.position = position
+	res.offset = screen_size/2
 	return
 }
 
-camera2d_screen_to_world_position :: proc(mouse_position: [2]f32, camera: Camera2D) -> mm.V2 {
-	return _camera2d_screen_to_world_position(mouse_position, camera)
+camera2d_screen_to_world_position :: proc(position: [2]f32, camera: Camera2D) -> [2]f32 {
+	return _camera2d_screen_to_world_position(position, camera)
 }
 
 @(private)
@@ -390,7 +384,7 @@ Uniform_Datatype :: enum i32 {
 	ivec2,
 	ivec3,
 	ivec4,
-	sampler2d,
+	sampler2D,
 	matrix3,
 	matrix4,
 }
@@ -411,7 +405,7 @@ buffer_target_begin :: proc(target: Buffer_Target, loc := #caller_location) {
 	assert(!there_is_a_buffer_target_in_use, loc=loc)
 	current_buffer_target_in_use = target
 	there_is_a_buffer_target_in_use = true
-	_buffer_target_begin(current_buffer_target_in_use)
+	_buffer_target_begin(current_buffer_target_in_use, loc)
 }
 
 buffer_target_end :: proc(loc := #caller_location) -> (res:Texture) {

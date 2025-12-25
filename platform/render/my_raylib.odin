@@ -14,6 +14,7 @@ import mm  "../../my_math"
 Texture   :: rl.Texture
 Texture2D :: Texture
 Font    :: rl.Font
+Camera2D :: rl.Camera2D
 
 font_default :: proc() -> Font {
 	return rl.GetFontDefault()
@@ -23,15 +24,8 @@ begin_drawing :: proc() {
 	rl.BeginDrawing()
 }
 
-to_platform_camera :: proc(camera: Camera2D) -> (res: rl.Camera2D) {
-	res.offset = -camera.position
-	res.target =  camera.target
-	res.zoom   =  camera.zoom
-	return
-}
-
 _camera2d_begin :: proc(camera: Camera2D) {
-	rl.BeginMode2D(to_platform_camera(camera))
+	rl.BeginMode2D(camera)
 }
 
 _camera2d_end :: proc() {
@@ -39,7 +33,7 @@ _camera2d_end :: proc() {
 }
 
 _camera2d_screen_to_world_position :: #force_inline proc(mouse_position: [2]f32, camera: Camera2D) -> mm.V2 {
-	return rl.GetScreenToWorld2D(mouse_position, to_platform_camera(camera))
+	return rl.GetScreenToWorld2D(mouse_position, camera)
 }
 
 _set_mouse_cursor :: #force_inline proc "contextless" (opt: Option) {
@@ -227,8 +221,8 @@ draw_texture_f32 :: proc(texture: Texture, x, y: f32, color: Color = WHITE, rota
 
 	rl.DrawTexturePro(texture, src, dst, origin, rotation, to_raylib_color(color)) // NOTE: Using `Pro` for rotating the sprite around its center
 }
-draw_texture_v2 :: proc(texture: Texture, pos: mm.V2, color: Color = WHITE, rotation: f32 = 0.0, scale: f32 = 1.0) {
-	draw_texture_f32(texture, pos.x, pos.y, color, rotation, scale)
+draw_texture_v2 :: proc(texture: Texture, pos: mm.V2, color: Color = WHITE, rotation: f32 = 0.0, scale: f32 = 1.0, flip_x := false, flip_y := false, loc := #caller_location) {
+	draw_texture_f32(texture, pos.x, pos.y, color, rotation, scale, flip_x, flip_y, loc)
 }
 draw_texture :: proc{draw_texture_f32, draw_texture_v2}
 
@@ -370,6 +364,15 @@ _draw_circle_quad :: proc(center: [2]f32, radius: f32, color: rl.Color) {
 	rl.EndShaderMode()
 }
 
+draw_quad :: proc(x, y, w, h: f32, color: Color) {
+	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {x, y, w, h}, {0,0}, 0, to_raylib_color(color))
+}
+
+draw_quad_by_center :: proc(center: [2]f32, size: [2]f32, color: Color) {
+	tl := center-size/2
+	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {tl.x, tl.y, size.x, size.y}, {0,0}, 0, to_raylib_color(color))
+}
+
 to_raylib_color :: #force_inline proc "contextless" (color: Color) -> rl.Color {
 	return {
 		cast(u8)( color.r*255+0.5 ),
@@ -409,7 +412,7 @@ _shader_use_end :: proc() {
 }
 
 _shader_set_uniform :: proc(shader: Shader, name: string, datatype: Uniform_Datatype, data: rawptr, loc := #caller_location) {
-	assert(datatype != .sampler2d, "Use `shader_set_uniform_texture` instead", loc=loc)
+	assert(datatype != .sampler2D, "Use `shader_set_uniform_texture` instead", loc=loc)
 	uniform_loc := rl.GetShaderLocation(shader, fmt.ctprintf("%v", name))
 	assert(uniform_loc != -1, loc=loc)
 	rl.SetShaderValue(shader, uniform_loc, data, cast(rl.ShaderUniformDataType)datatype)
