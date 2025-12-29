@@ -5,19 +5,23 @@ package platform
 
 import "core:fmt"
 import "core:strings"
-import os "core:os/os2"
+import  "core:os/os2"
+import  "core:os"
 
+_create_or_open :: proc(path: string) -> (os.Handle, os.Error) {
+	return os.open(path, os.O_WRONLY|os.O_TRUNC|os.O_CREATE, mode=0o666)
+}
 
 create_file_if_needed :: proc(path: string) {
-	if !os.exists(path) {
-		_, err := os.create(path)
+	if !os2.exists(path) {
+		_, err := os2.create(path)
 		assert(err == nil, fmt.tprint(err))
 	}
 }
 
 create_directory_if_needed :: proc(path: string) {
-	if !os.exists(path) {
-		err := os.make_directory(path)
+	if !os2.exists(path) {
+		err := os2.make_directory(path)
 		assert(err == nil, fmt.tprint(err))
 	}
 }
@@ -72,7 +76,7 @@ _create_package :: proc(name: string, identifier: string, version_first, version
 </plist>`,
 		name, name, identifier, version_first, version_second, version_third, version_first, version_second, version_third, minos
 	)
-	err2 := os.write_entire_file(strings.to_string(sb), transmute([]u8)contents)
+	err2 := os2.write_entire_file(strings.to_string(sb), transmute([]u8)contents)
 	assert( err2 == nil )
 
 	move_to_parent_directory :: proc(sb: ^strings.Builder) {
