@@ -16,7 +16,7 @@ Texture2D :: Texture
 Font    :: rl.Font
 Camera2D :: rl.Camera2D
 
-font_default :: proc() -> Font {
+font_default :: proc "contextless" () -> Font {
 	return rl.GetFontDefault()
 }
 

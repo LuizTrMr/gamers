@@ -31,3 +31,8 @@ Period :: struct {
 	curr, total: f32,
 }
 period_t :: proc "contextless" (period: Period) -> f32 { return period.curr / period.total }
+
+wrap :: proc "contextless" (value, m: $T) -> T {
+	value := (value % m + m) % m
+	return value
+}
