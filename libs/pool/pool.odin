@@ -61,6 +61,12 @@ static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #calle
 	pool.len -= 1
 }
 
+static_remove_slot :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) {
+	assert(is_active_from_key(pool.keys[slot.handle]), loc=loc)
+	pool.keys[slot.handle] = Key( u32(pool.keys[slot.handle]) & ~ACTIVE_BIT )
+	pool.len -= 1
+}
+
 static_batch_remove :: proc(pool: ^Static($T, $N), handles: []int, loc := #caller_location) {
 	for handle in handles {
 		static_remove(pool, handle, loc)
@@ -71,6 +77,11 @@ static_clear :: proc(pool: ^Static($T, $N)) {
 	pool.items = {}
 	pool.keys  = {}
 	pool.len   = 0
+}
+
+static_safe_ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
+	assert(is_valid(pool^, slot), loc=loc)
+	return &pool.items[slot.handle]
 }
 
 Iterator :: struct {
@@ -222,9 +233,10 @@ dynamic_is_valid :: proc "contextless" (p: Dynamic($T), slot: Slot) -> bool {
 
 append         :: proc{static_append        , dynamic_append}
 alloc_item     :: proc{static_alloc_item    , dynamic_alloc_item}
-remove         :: proc{static_remove        , dynamic_remove}
+remove         :: proc{static_remove        , dynamic_remove, static_remove_slot}
 batch_remove   :: proc{static_batch_remove  , dynamic_batch_remove}
 clear          :: proc{static_clear         , dynamic_clear}
 iterate        :: proc{static_iterate       , dynamic_iterate}
 iterate_by_ptr :: proc{static_iterate_by_ptr, dynamic_iterate_by_ptr}
 is_valid       :: proc{static_is_valid      , dynamic_is_valid} 
+safe_ptr       :: proc{static_safe_ptr} 
