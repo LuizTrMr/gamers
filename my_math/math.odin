@@ -22,6 +22,7 @@ mod        :: math.mod
 sqrt       :: math.sqrt
 floor      :: math.floor
 sign       :: math.sign_f32
+fmod       :: math.remainder
 
 roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 	return cast(i32)(v + 0.5)
@@ -83,6 +84,7 @@ v2_signs :: proc (v: V2) -> (res:V2) {
 @(deprecated="`angle_between` is deprecated, use `smallest_angle_between` instead")
 angle_between :: linalg.angle_between
 
+V2_ZERO: V2: 0
 UP    : V2 : {0,-1}
 RIGHT : V2 : {1, 0}
 DOWN  : V2 : {0, 1}
@@ -135,11 +137,17 @@ angle_from_direction :: proc "contextless" (dir: V2) -> (res:f32) {
 }
 
 direction_from_angle :: proc "contextless" (radians: f32) -> V2 {
-	return { math.cos(radians), math.sin(radians) }
+	res := normalize(V2{ math.cos(radians), math.sin(radians) })
+	for &v in res {
+		if is_near_f32(v, 0, 0.001) do v = 0
+		else if is_near_f32(v,  1, 0.001) do v = 1
+		else if is_near_f32(v, -1, 0.001) do v = -1
+	}
+	return res
 }
 
-is_near_f32 :: proc "contextless" (fixed, to_test: f32, distance: f32) -> bool {
-	return fixed - distance <= to_test && to_test <= fixed + distance
+is_near_f32 :: proc "contextless" (a, b: f32, distance: f32) -> bool {
+	return abs(a-b) <= distance
 }
 
 is_near_v2 :: proc "contextless" (a, b: V2, radius: f32) -> bool {
