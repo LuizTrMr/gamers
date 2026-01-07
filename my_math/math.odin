@@ -99,6 +99,12 @@ V2_LEFT  :: LEFT
 Direction :: enum {
 	up, right, down, left,
 }
+direction_vectors: [Direction]V2 = {
+	.up    = UP,
+	.right = RIGHT,
+	.down  = DOWN,
+	.left  = LEFT,
+}
 
 from_to :: #force_inline proc "contextless" (from, to: V2) -> V2 {
 	return to-from
@@ -619,4 +625,12 @@ random_direction :: proc() -> V2 {
 
 random_int31_range :: proc(min, max: i32) -> i32 {
 	return min + (rand.int31() % (max-min+1))
+}
+
+random_positive_or_negative :: proc() -> f32 {
+	return cast(f32) ((rand.int31() % 2)*2)-1
+}
+
+random_pick :: proc(slice: []$T) -> T {
+	return rand.choice(slice)
 }
