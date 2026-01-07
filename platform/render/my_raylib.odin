@@ -373,6 +373,14 @@ draw_quad_by_center :: proc(center: [2]f32, size: [2]f32, color: Color) {
 	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {tl.x, tl.y, size.x, size.y}, {0,0}, 0, to_raylib_color(color))
 }
 
+draw_rounded_rectangle :: proc(top_left, size: [2]f32, roundness: [4]f32, color: Color) {
+	shader_begin(g_rounded_rectangle_shader)
+	roundness := roundness
+	shader_set_uniform("roundness", .vec4, &roundness)
+	draw_quad(top_left.x, top_left.y, size.x, size.y, color)
+	shader_end()
+}
+
 to_raylib_color :: #force_inline proc "contextless" (color: Color) -> rl.Color {
 	return {
 		cast(u8)( color.r*255+0.5 ),
@@ -441,30 +449,96 @@ texture_height :: proc(texture: Texture) -> i32 {
 
 g_quad_texture: Texture
 g_circle_shader: Shader
+g_rounded_rectangle_shader: Shader
 _init :: proc() {
 	img := rl.GenImageColor(1, 1, rl.WHITE)
 	defer rl.UnloadImage(img)
 	g_quad_texture = rl.LoadTextureFromImage(img)
 	
 	circle_shader :: `
-	#version 410
+#version 410
 
-	in vec2 fragTexCoord;
-	in vec4 fragColor;
+in vec2 fragTexCoord;
+in vec4 fragColor;
 
-	out vec4 finalColor;
+out vec4 finalColor;
 
-	float circle(vec2 uv, vec2 center, float radius) {
-		return step(length(uv-center), radius);
-	}
+float circle(vec2 uv, vec2 center, float radius) {
+	return step(length(uv-center), radius);
+}
 
-	void main() {
-		const vec2 center = vec2(0.5);
-		vec2 uv = fragTexCoord;
-		float c = circle(uv, center, 0.5);
-		finalColor = c*fragColor;
-	}
+void main() {
+	const vec2 center = vec2(0.5);
+	vec2 uv = fragTexCoord;
+	float c = circle(uv, center, 0.5);
+	finalColor = c*fragColor;
+}
 	`
 
-	g_circle_shader = rl.LoadShaderFromMemory(nil, circle_shader)
+	rounded_rectangle_shader :: `
+// The MIT License
+// Copyright © 2015 Inigo Quilez
+// Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+// https://www.youtube.com/c/InigoQuilez
+// https://iquilezles.org
+
+
+// Signed distance to a 2D rounded box. Tutorials explaining
+// how it works: 
+//
+// https://www.youtube.com/watch?v=62-pRVZuS5c
+// https://www.youtube.com/watch?v=s5NGeUV2EyU
+//
+// See also generalization to other corner shapes here:
+//
+// https://www.shadertoy.com/view/4cG3R1
+//
+//
+// List of some other 2D distances:
+//    https://www.shadertoy.com/playlist/MXdSRf
+// and
+//    iquilezles.org/articles/distfunctions2d
+
+#version 410
+
+in vec2 fragmentTexCoord;
+in vec4 fragmentColor;
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+out vec4 finalColor;
+
+// b.x = half width
+// b.y = half height
+// r.x = roundness top-right  
+// r.y = roundness boottom-right
+// r.z = roundness top-left
+// r.w = roundness bottom-left
+float sdRoundBox(vec2 p, vec2 b,  vec4 r) 
+{
+    r.xy = (p.x>0.0)?r.xy : r.zw;
+    r.x  = (p.y>0.0)?r.x  : r.y;
+    vec2 q = abs(p)-b+r.x;
+    return min(max(q.x,q.y),0.0) + length(max(q,0.0)) - r.x;
+}
+
+uniform sampler2D texture0;
+uniform vec4 roundness = vec4(0.);
+
+void main()
+{
+    vec2 uv = fragTexCoord;
+    vec2  p = uv-vec2(0.5);
+    vec4  r = roundness;
+    vec2  b = vec2(0.5, 0.5);
+	float d = sdRoundBox(p, b, r);
+
+    vec4 total = (d>0.0) ? vec4(0.) : fragColor;
+	finalColor = total;
+}
+	`
+
+	g_circle_shader            = rl.LoadShaderFromMemory(nil, circle_shader)
+	g_rounded_rectangle_shader = rl.LoadShaderFromMemory(nil, rounded_rectangle_shader)
 }
