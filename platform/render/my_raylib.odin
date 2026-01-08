@@ -36,6 +36,10 @@ _camera2d_screen_to_world_position :: #force_inline proc(mouse_position: [2]f32,
 	return rl.GetScreenToWorld2D(mouse_position, camera)
 }
 
+_camera2d_screen_from_world_position :: #force_inline proc(mouse_position: [2]f32, camera: Camera2D) -> mm.V2 {
+	return rl.GetWorldToScreen2D(mouse_position, camera)
+}
+
 _set_mouse_cursor :: #force_inline proc "contextless" (opt: Option) {
 	switch opt {
 	case .enabled : rl.EnableCursor()

@@ -366,8 +366,12 @@ camera2d_make :: proc(target: [2]f32 = 0, screen_size: [2]f32) -> (res:Camera2D)
 	return
 }
 
-camera2d_screen_to_world_position :: proc(position: [2]f32, camera: Camera2D) -> [2]f32 {
+camera2d_world_from_screen_position :: proc(position: [2]f32, camera: Camera2D) -> [2]f32 {
 	return _camera2d_screen_to_world_position(position, camera)
+}
+
+camera2d_screen_from_world_position :: proc(position: [2]f32, camera: Camera2D) -> [2]f32 {
+	return _camera2d_screen_from_world_position(position, camera)
 }
 
 @(private)
