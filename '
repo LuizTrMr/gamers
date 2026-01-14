@@ -97,6 +97,7 @@ where intrinsics.type_is_struct(T) {
 @(private="file")
 serialize_to_builder_any :: proc(a: any, sb: ^strings.Builder, indentation: int = 0, config: Serializer_Config) {
 	assert(a != nil, "a is `nil`")
+	fmt.println("a:", a)
 
 	ti := reflect.type_info_base( type_info_of(a.id) )
 	if should_indent(sb) do indent_pls(sb, indentation)
@@ -290,8 +291,15 @@ serialize_to_builder_any :: proc(a: any, sb: ^strings.Builder, indentation: int 
 			strings.write_byte(sb, '\n')
 
 			for field, i in reflect.struct_fields_zipped(a.id) {
+				fmt.println("field.tag:", field.tag)
+				panic("A")
 				if ok, err := contains_tag(field.tag, "deprecated")  ; ok && err == nil do continue
 				if ok, err := contains_tag(field.tag, "no_serialize"); ok && err == nil do continue
+				x, err := contains_tag(field.tag, "no_serialize")
+				if x {
+					fmt.println(field)
+					panic("A")
+				}
 				indent_pls(sb, indentation+4)
 				strings.write_string(sb, field.name)
 				strings.write_byte(sb, ASSIGN_TOKEN)
@@ -1117,7 +1125,6 @@ assign_array :: proc(base: rawptr, elem: ^reflect.Type_Info, length: uintptr, pa
 
 @(private)
 contains_tag :: proc(struct_tags: reflect.Struct_Tag, tag_name: string) -> (ok: bool, err: mem.Allocator_Error) {
-	if len(struct_tags) == 0 do return false, nil
 	tags := strings.split(string(struct_tags), " ", context.temp_allocator) or_return
 	for t in tags {
 		if t == tag_name do return true, nil
