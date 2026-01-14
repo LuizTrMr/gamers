@@ -43,6 +43,19 @@ complementary_from :: proc(color: Color) -> (res: Color) {
 	return
 }
 
+color_from_rgb :: proc(rgb: [$N]u8) -> (res: [N]f32) {
+	for i in 0..<N {
+		assert(0 <= rgb[i]  , fmt.tprintfln("%v value = %v", i, rgb[i]))
+		assert(rgb[i] <= 255, fmt.tprintfln("%v value = %v", i, rgb[i]))
+	}
+
+	for i in 0..<N {
+		res[i] = f32(rgb[i])/255.
+	}
+	return
+}
+
+
 rgb_to_color :: proc(rgb: [3]f32) -> (res: Color) {
 	for i in 0..<len(rgb) {
 		assert(0 <= rgb[i]  , fmt.tprintfln("%v value = %v", i, rgb[i]))
@@ -393,11 +406,6 @@ Uniform_Datatype :: enum i32 {
 	matrix4,
 }
 
-@(private)
-there_is_a_shader_in_use: bool
-@(private)
-current_shader_in_use: Shader
-
 buffer_target_load :: proc(width, height: i32) -> Buffer_Target {
 	return _buffer_target_load(width, height)
 }
@@ -420,6 +428,11 @@ buffer_target_end :: proc(loc := #caller_location) -> (res:Texture) {
 	current_buffer_target_in_use = {}
 	return 
 }
+
+@(private)
+there_is_a_shader_in_use: bool
+@(private)
+current_shader_in_use: Shader
 
 shader_begin :: proc(shader: Shader) {
 	assert(!there_is_a_shader_in_use)

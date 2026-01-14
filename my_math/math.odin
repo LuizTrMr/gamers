@@ -548,6 +548,10 @@ fish :: proc "contextless" (t: f32, a, b: f32, tail: f32 = 1.0, θ: f32 = 0.0) -
 }
 
 // Geometry I guess
+Rect :: struct {
+	start, size: V2,
+}
+
 Bounds :: struct {
 	start: V2,
 	end  : V2,
