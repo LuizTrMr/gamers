@@ -79,6 +79,10 @@ static_clear :: proc(pool: ^Static($T, $N)) {
 	pool.len   = 0
 }
 
+ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
+	return &pool.items[slot.handle]
+}
+
 static_safe_ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
 	assert(is_valid(pool^, slot), loc=loc)
 	return &pool.items[slot.handle]
