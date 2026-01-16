@@ -355,7 +355,7 @@ draw_circle :: proc{draw_circle_f32,draw_circle_v2}
 
 _draw_circle :: proc(center: [2]f32, radius: f32, color: Color) {
 	rl.BeginShaderMode(g_circle_shader)
-	_draw_circle_quad(center, radius, color)
+	draw_circle_quad(center, radius, color)
 	rl.EndShaderMode()
 }
 
