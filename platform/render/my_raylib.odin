@@ -346,26 +346,22 @@ draw_rectangle_lines :: proc(pos, size: mm.V2, thick: f32, color: Color) {
 }
 
 draw_circle_f32 :: proc(x, y, radius: f32, color: Color) {
-	_draw_circle({x,y}, radius, to_raylib_color(color))
+	_draw_circle({x,y}, radius, color)
 }
 draw_circle_v2 :: proc(center: mm.V2, radius: f32, color: Color) {
-	_draw_circle(center, radius, to_raylib_color(color))
+	_draw_circle(center, radius, color)
 }
 draw_circle :: proc{draw_circle_f32,draw_circle_v2}
 
-_draw_circle :: proc(center: [2]f32, radius: f32, color: rl.Color) {
+_draw_circle :: proc(center: [2]f32, radius: f32, color: Color) {
 	rl.BeginShaderMode(g_circle_shader)
 	_draw_circle_quad(center, radius, color)
 	rl.EndShaderMode()
 }
+
 draw_circle_quad :: proc(center: [2]f32, radius: f32, color: Color) {
-	_draw_circle_quad(center, radius, to_raylib_color(color))
-}
-_draw_circle_quad :: proc(center: [2]f32, radius: f32, color: rl.Color) {
 	top_left := center-radius
-	rl.BeginShaderMode(g_circle_shader)
-	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {top_left.x, top_left.y, radius*2, radius*2}, {0,0}, 0, color)
-	rl.EndShaderMode()
+	rl.DrawTexturePro(g_quad_texture, {0,0,1,1}, {top_left.x, top_left.y, radius*2, radius*2}, {0,0}, 0, to_raylib_color(color))
 }
 
 draw_quad :: proc(x, y, w, h: f32, color: Color) {
