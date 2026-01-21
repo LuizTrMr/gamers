@@ -200,6 +200,14 @@ get_text_size :: proc(font: Font, text: cstring, font_size: f32) -> [2]f32 {
 	return rl.MeasureTextEx(font, text, font_size, 1.0) // NOTE: Default spacing = 1.0 (Taken from here: https://github.com/raysan5/raylib/blob/44659b7ba8bd6d517d75fac8675ecd026f713240/src/rtext.c#L1207)
 }
 
+draw_texture_y_flipped :: proc(texture: Texture, x, y: f32, color: Color = WHITE) {
+	rect := rl.Rectangle{0, 0, f32(texture.width), -f32(texture.height)}
+	rl.DrawTextureRec(texture,
+					  rect,
+					  {x, y},
+					  to_raylib_color(color))
+}
+
 draw_texture_rectangle :: proc(texture: Texture, x, y: f32, rectangle: Rectangle, color: Color = WHITE) {
 	rl.DrawTextureRec(texture,
 					  {rectangle.x, rectangle.y, rectangle.width, rectangle.height},
@@ -436,6 +444,11 @@ datatype: Uniform_Datatype, data: rawptr, count: i32, loc := #caller_location) {
 _shader_set_uniform_texture :: proc(shader: Shader, name: string, texture: Texture, loc := #caller_location) {
 	uniform_loc := rl.GetShaderLocation(shader, fmt.ctprintf("%v", name))
 	assert(uniform_loc != -1, loc=loc)
+	rl.SetShaderValueTexture(shader, uniform_loc, texture)
+}
+
+_shader_set_uniform_texture_unsafe :: proc(shader: Shader, name: string, texture: Texture, loc := #caller_location) {
+	uniform_loc := rl.GetShaderLocation(shader, fmt.ctprintf("%v", name))
 	rl.SetShaderValueTexture(shader, uniform_loc, texture)
 }
 

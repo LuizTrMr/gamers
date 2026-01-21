@@ -460,6 +460,10 @@ shader_set_uniform_texture :: proc(uniform_name: string, texture: Texture, loc :
 	_shader_set_uniform_texture(current_shader_in_use, uniform_name, texture, loc)
 } 
 
+shader_set_uniform_texture_unsafe :: proc(uniform_name: string, texture: Texture, loc := #caller_location) {
+	_shader_set_uniform_texture_unsafe(current_shader_in_use, uniform_name, texture, loc)
+} 
+
 clear :: proc(options: bit_set[Clear_Option], color: Color) {
 	_clear(options, color)
 }
