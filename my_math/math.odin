@@ -591,9 +591,14 @@ clockwise_points_from_bounds :: proc(bounds: Bounds) -> (p0, p1, p2, p3: V2) {
 	return
 }
 
-is_point_inside_rect :: proc "contextless" (p: V2, start: V2, size: V2) -> bool {
+is_point_inside_rect_struct :: proc "contextless" (p: V2, rect: Rect) -> bool {
+	return is_point_inside_dimensions(p, rect.start, rect.size)
+}
+
+is_point_inside_dimensions :: proc "contextless" (p: V2, start: V2, size: V2) -> bool {
 	return p.x >= start.x && p.x <= start.x+size.x && p.y >= start.y && p.y <= start.y+size.y
 }
+is_point_inside_rect :: proc{is_point_inside_rect_struct, is_point_inside_dimensions}
 
 is_point_inside_bounds :: proc "contextless" (p: V2, b: Bounds) -> bool {
 	return is_point_inside_rect(p, b.start, bounds_size(b))
