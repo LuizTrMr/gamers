@@ -1,5 +1,6 @@
 package libs_gap_buffer
 
+import "core:fmt"
 import "core:mem"
 import "core:strings"
 
@@ -127,8 +128,15 @@ set_cursor_position :: proc(buffer: ^Gap_Buffer, #any_int x: int, zero := false)
 zero :: proc(buffer: ^Gap_Buffer, #any_int start, end: int) {
 	mem.zero_slice(buffer.buf[start:end])
 }
-index_of_content_end :: proc(buffer: Gap_Buffer, #any_int start_at: int = 0) -> int {
-	index := start_at
-	for index < len(buffer.buf) && buffer.buf[index] != 0 do index += 1
-	return index
+index_of_content_end :: proc(buffer: Gap_Buffer) -> (index:int) {
+	if buffer.gap_start+buffer.gap_size < len(buffer.buf) {
+		// There is stufff after the cursor, so count how many stuff we have:
+		n_after_cursor := len(buffer.buf) - (buffer.gap_start+buffer.gap_size)
+		index = buffer.gap_start+n_after_cursor
+	}
+	else {
+		// Otherwise it is just the gap start
+		index = buffer.gap_start
+	}
+	return
 }
