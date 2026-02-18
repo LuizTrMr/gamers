@@ -208,6 +208,66 @@ line_line_intersection :: proc(p1, p2, p3, p4: V2) -> bool {
 	return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1
 }
 
+collides_line_rect :: proc(p1, p2: V2, r: Rect) -> (V2, bool) {
+	if r.size.x == 0 || r.size.y == 0 do return {}, false
+	if p1.x >= r.start.x && p1.x <= r.start.x+r.size.x && p1.y >= r.start.y && p1.y <= r.start.y+r.size.y do return p1, true
+
+	p_top   , b_top    := line_line_intersection_point(p1, p2, {r.start.x,r.start.y}, {r.start.x+r.size.x, r.start.y})
+	p_right , b_right  := line_line_intersection_point(p1, p2, {r.start.x+r.size.x,r.start.y}, {r.start.x+r.size.x, r.start.y+r.size.y})
+	p_bottom, b_bottom := line_line_intersection_point(p1, p2, {r.start.x,r.start.y+r.size.y}, {r.start.x+r.size.x, r.start.y+r.size.y})
+	p_left  , b_left   := line_line_intersection_point(p1, p2, {r.start.x,r.start.y}, {r.start.x, r.start.y+r.size.y})
+
+	if !b_top && !b_right && !b_bottom && !b_left do return V2{}, false
+
+	intersection_point_a: V2
+	is_set_a: bool
+	intersection_point_b: V2
+	is_set_b: bool
+
+	if b_top {
+		intersection_point_a = p_top
+		is_set_a = true
+	}
+
+	if b_right {
+		if is_set_a {
+			intersection_point_b = p_right
+			is_set_b = true
+		} else {
+			intersection_point_a = p_right
+			is_set_a = true
+		}
+	}
+
+	if b_bottom {
+		if is_set_a {
+			intersection_point_b = p_bottom
+			is_set_b = true
+		} else {
+			intersection_point_a = p_bottom
+			is_set_a = true
+		}
+	}
+
+	if b_left {
+		if is_set_a {
+			intersection_point_b = p_left
+			is_set_b = true
+		} else {
+			intersection_point_a = p_left
+			is_set_a = true
+		}
+	}
+
+	// Only pa was hit
+	if is_set_a && !is_set_b do return intersection_point_a, true
+
+	// Closest point to p1 is the point that was hit first
+	if length2(intersection_point_a-p1) <= length2(intersection_point_b-p1) do return intersection_point_a, true
+
+	return intersection_point_b, true
+}
+
 // ───▄▄─▄████▄▐▄▄▄▌
 // ──▐──████▀███▄█▄▌   @Splines!
 // ▐─▌──█▀▌──▐▀▌▀█▀    Sources:
@@ -571,11 +631,11 @@ bounds_center :: proc "contextless" (b: Bounds) -> V2 {
 	return b.start+bounds_size(b)/2
 }
 
-out_of_bounds :: proc "contextless" (object, bounds: Bounds) -> bool {
-	return object.end.x   < bounds.start.x ||
-	   	   object.start.x > bounds.end.x   ||
-	   	   object.end.y   < bounds.start.x ||
-	   	   object.start.y > bounds.end.y  
+out_of_bounds :: proc "contextless" (a, b: Bounds) -> bool {
+	return a.end.y   < b.start.y || 
+		   a.end.x   < b.start.x || 
+		   a.start.x > b.end.x || 
+		   a.start.y > b.end.y
 }
 
 size_from_ints :: proc "contextless" (#any_int x: i32, #any_int y: i32) -> V2 {
