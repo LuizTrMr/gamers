@@ -152,9 +152,14 @@ _clear :: proc(options: bit_set[Clear_Option], color: Color) {
 		gl.Clear(gl.STENCIL_BUFFER_BIT)
 	}
 }
-clear_background :: proc(color: Color) {
+clear_background_color :: proc(color: Color) {
 	rl.ClearBackground(to_raylib_color(color))
 }
+
+clear_background_hsv :: proc(hsv: HSV) {
+	rl.ClearBackground(to_raylib_color(color_from_hsv(hsv)))
+}
+clear_background :: proc{clear_background_color, clear_background_hsv}
 
 stencil_init :: proc(major, minor: int) {
 	gl.load_up_to(major, minor, glfw.gl_set_proc_address) 
@@ -200,11 +205,14 @@ get_text_size :: proc(font: Font, text: cstring, font_size: f32) -> [2]f32 {
 	return rl.MeasureTextEx(font, text, font_size, 1.0) // NOTE: Default spacing = 1.0 (Taken from here: https://github.com/raysan5/raylib/blob/44659b7ba8bd6d517d75fac8675ecd026f713240/src/rtext.c#L1207)
 }
 
-draw_texture_y_flipped :: proc(texture: Texture, x, y: f32, color: Color = WHITE) {
-	rect := rl.Rectangle{0, 0, f32(texture.width), -f32(texture.height)}
-	rl.DrawTextureRec(texture,
-					  rect,
-					  {x, y},
+draw_texture_y_flipped :: proc(texture: Texture, x, y: f32, color: Color = WHITE, rotation: f32 = 0, scale: f32 = 1.0) {
+	src := rl.Rectangle{0, 0, f32(texture.width), -f32(texture.height)}
+	dst := rl.Rectangle{x, y, f32(texture.width)*scale,  f32(texture.height)*scale}
+	rl.DrawTexturePro(texture,
+					  src,
+					  dst,
+					  0,
+				  	  rotation,
 					  to_raylib_color(color))
 }
 

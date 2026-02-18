@@ -22,6 +22,7 @@ set_target_frames :: proc(fps: i32) {
 get_frame_duration :: proc() -> f32 {
 	return _get_frame_duration()
 }
+get_last_frame_duration :: get_frame_duration
 
 open :: proc(path: string) -> (^os2.File, os2.Error) {
 	return _open_simple(path)
