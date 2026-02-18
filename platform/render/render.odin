@@ -456,6 +456,10 @@ shader_set_uniform_array :: proc(uniform_name: string, datatype: Uniform_Datatyp
 	_shader_set_uniform_array(current_shader_in_use, uniform_name, datatype, data, count, loc)
 } 
 
+shader_set_uniform_array_unsafe :: proc(uniform_name: string, datatype: Uniform_Datatype, data: rawptr, count: i32, loc := #caller_location) {
+	_shader_set_uniform_array_unsafe(current_shader_in_use, uniform_name, datatype, data, count, loc)
+}
+
 shader_set_uniform_texture :: proc(uniform_name: string, texture: Texture, loc := #caller_location) {
 	_shader_set_uniform_texture(current_shader_in_use, uniform_name, texture, loc)
 } 

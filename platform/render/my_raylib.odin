@@ -448,6 +448,11 @@ datatype: Uniform_Datatype, data: rawptr, count: i32, loc := #caller_location) {
 	assert(uniform_loc != -1, loc=loc)
 	rl.SetShaderValueV(shader, uniform_loc, data, cast(rl.ShaderUniformDataType)datatype, count)
 }
+_shader_set_uniform_array_unsafe :: proc(shader: Shader, name: string,
+datatype: Uniform_Datatype, data: rawptr, count: i32, loc := #caller_location) {
+	uniform_loc := rl.GetShaderLocation(shader, fmt.ctprintf("%v", name))
+	rl.SetShaderValueV(shader, uniform_loc, data, cast(rl.ShaderUniformDataType)datatype, count)
+}
 
 _shader_set_uniform_texture :: proc(shader: Shader, name: string, texture: Texture, loc := #caller_location) {
 	uniform_loc := rl.GetShaderLocation(shader, fmt.ctprintf("%v", name))
