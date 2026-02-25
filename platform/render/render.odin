@@ -8,6 +8,8 @@ import mm "../../my_math"
 
 Color  :: mm.V4
 Color3 :: mm.V3
+sRGB :: Color
+Linear_sRGB :: distinct Color
 
 BLANK      :: Color{0.0  , 0.0  , 0.0  , 0.0}
 WHITE      :: Color{1.0  , 1.0  , 1.0  , 1.0}
@@ -185,12 +187,47 @@ texture_as_multi_texture :: proc(texture: Texture) -> Multi_Texture {
 }
 multi_texture_from_texture :: texture_as_multi_texture
 
+// Source: https://bottosson.github.io/posts/colorwrong/#what-can-we-do%3F
+linear_srgb_from_srgb :: proc(srgb: sRGB) -> (res:Linear_sRGB) {
+	f_inv :: #force_inline proc(x: f32) -> f32 {
+		if x >= 0.04045 {
+			return math.pow((x + 0.055)/(1.055),2.4)
+		}
+		return x / 12.92
+	}
+
+	res.r = f_inv(srgb.r)
+	res.g = f_inv(srgb.g)
+	res.b = f_inv(srgb.b)
+	res.a = f_inv(srgb.a)
+	return
+}
+
+// Sources:
+//  https://bottosson.github.io/posts/colorwrong/#what-can-we-do%3F
+//  https://github.com/EpicGamesExt/raddebugger/blob/08642d2745da516387fa0f43639b7a8776a154b0/src/base/base_math.c#L604
+srgb_from_linear_srgb :: proc(linear: Linear_sRGB) -> (res:sRGB) {
+	f :: #force_inline proc(x: f32) -> f32 {
+		if x >= 0.0031308 || x < 0 {
+			return 1.055 * math.pow(x,1.0/2.4) - 0.055
+		}
+		return 12.92 * x
+	}
+
+	res.r = f(linear.r)
+	res.g = f(linear.g)
+	res.b = f(linear.b)
+	res.a = f(linear.a)
+	return
+}
+
 // Color Picker: https://www.tawansunflower.com/colorpicker
 OkLab :: struct {
 	L, a, b: f32,
 }
+Oklab :: OkLab
 
-oklab_to_color :: proc "contextless" (color: OkLab) -> (res: Color) {
+linear_srgb_from_oklab :: proc "contextless" (color: OkLab) -> (res: Linear_sRGB) {
 	l_ := color.L + 0.3963377774 * color.a + 0.2158037573 * color.b
     m_ := color.L - 0.1055613458 * color.a - 0.0638541728 * color.b
     s_ := color.L - 0.0894841775 * color.a - 1.2914855480 * color.b
@@ -204,23 +241,58 @@ oklab_to_color :: proc "contextless" (color: OkLab) -> (res: Color) {
 	res.b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
 	res.a = 1.0
 
+	res.r = clamp(res.r, 0, 1)
+	res.g = clamp(res.g, 0, 1)
+	res.b = clamp(res.b, 0, 1)
     return
 }
 
-color_to_oklab :: proc "contextless" (c: Color) -> (res: OkLab) { 
+oklab_from_linear_srgb :: proc "contextless" (c: Linear_sRGB) -> (res: OkLab) { 
 	l := 0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b
 	m := 0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b
 	s := 0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b
 
-    l_ := mm.cbrt(l)
+	l_ := mm.cbrt(l)
     m_ := mm.cbrt(m)
     s_ := mm.cbrt(s)
 
-	res.L = 0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_
-	res.a = 1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_
-	res.b = 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
+    res.L = 0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_
+    res.a = 1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_
+    res.b = 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
 	
 	return
+}
+
+/*
+	L -> [0,1]
+	c -> [-0.5,0.5]
+	h -> [0,2π]
+*/
+Oklch :: struct {
+	L, c, h: f32,
+}
+
+oklch_from_oklab :: proc(using oklab: Oklab) -> (res:Oklch) {
+	res.L = L
+	res.c = mm.length([2]f32{a,b})
+	res.h = math.atan2(b,a) + math.PI // -> [-π,π]+π -> [0,2π]
+	return
+}
+oklab_from_oklch :: proc(using oklch: Oklch) -> (res:Oklab) {
+	res.L = L
+	res.a = c * math.cos(h)
+	res.b = c * math.sin(h)
+	return
+}
+
+color_from_oklch :: proc(oklch: Oklch) -> Color {
+	return srgb_from_linear_srgb(linear_srgb_from_oklab(oklab_from_oklch(oklch)))
+}
+oklch_from_color :: proc(color: Color) -> Oklch {
+	y := linear_srgb_from_srgb(color)
+	x := oklab_from_linear_srgb(y)
+	fmt.println("x:", x)
+	return oklch_from_oklab(x)
 }
 
 HSV :: distinct [3]f32
@@ -299,8 +371,10 @@ hsv_to_rgb :: proc(h, s, v: f32) -> [3]f32 {
     return {r * 255, g * 255, b * 255}
 }
 
-color_from_hsv :: hsv_to_color
-hsv_to_color :: proc(col: HSV) -> Color {
+color_from_hsv :: proc(col: HSV, loc := #caller_location) -> Color {
+	assert(col.r >= 0 && col.r <= 360, loc=loc)
+	assert(col.g >= 0 && col.g <= 100, loc=loc)
+	assert(col.b >= 0 && col.b <= 100, loc=loc)
 	h := col[0] / 360
 	s := col[1] / 100
 	v := col[2] / 100
@@ -428,6 +502,10 @@ buffer_target_end :: proc(loc := #caller_location) -> (res:Texture) {
 	current_buffer_target_in_use = {}
 	return 
 }
+frame_buffer_load   :: buffer_target_load
+frame_buffer_unload :: buffer_target_unload
+frame_buffer_begin  :: buffer_target_begin
+frame_buffer_end    :: buffer_target_end
 
 @(private)
 there_is_a_shader_in_use: bool
