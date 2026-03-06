@@ -26,13 +26,15 @@ Static :: struct($T: typeid, $N: int) {
 	len  : int,
 }
 
+// TODO: Doesn't make sense to up the gen_key when we reserve, we need to up it when we remove because
+//       that is when the slot gets invalidated. @gen_keys
 static_reserve_slot :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (res:Slot) {
 	for key, handle in pool.keys {
 		if !is_active_from_key(key) {
 			gen_key := gen_key_from_key(pool.keys[handle])
-			gen_key += 1
 
 			pool.keys[handle] = Key(gen_key | ACTIVE_BIT)
+			pool.items[handle] = {} // Zero it
 
 			res.gen_key = gen_key
 			res.handle = auto_cast handle
@@ -45,26 +47,36 @@ static_reserve_slot :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (
 
 static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) -> (res:Slot) {
 	slot := static_reserve_slot(pool, loc)
-	pool.items[slot.handle] = item
 	return slot
 }
 
 static_alloc_item :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (^T, Slot) {
 	slot := static_reserve_slot(pool, loc)
-	pool.items[slot.handle] = {}
 	return &pool.items[slot.handle], slot
 }
 
 static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #caller_location) {
 	assert(is_active_from_key(pool.keys[handle]), loc=loc)
-	pool.keys[handle] = Key( u32(pool.keys[handle]) & ~ACTIVE_BIT )
+	current_key := pool.keys[handle]
+	next_key: Key
+
+	// Inactivate that slot in the pool
+	next_key = current_key & Key(~ACTIVE_BIT)
+
+	// Up the gen_key
+	gen_key := gen_key_from_key(next_key)
+	next_key = gen_key+1
+
+	// Commit changes
+	pool.keys[handle] = next_key
+
+	// We removed an item
 	pool.len -= 1
 }
 
 static_remove_slot :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) {
-	assert(is_active_from_key(pool.keys[slot.handle]), loc=loc)
-	pool.keys[slot.handle] = Key( u32(pool.keys[slot.handle]) & ~ACTIVE_BIT )
-	pool.len -= 1
+	assert( static_is_valid(pool.slot) )
+	static_remove(pool, slot.handle, loc)
 }
 
 static_batch_remove :: proc(pool: ^Static($T, $N), handles: []int, loc := #caller_location) {
@@ -86,6 +98,10 @@ ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
 static_safe_ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
 	assert(is_valid(pool^, slot), loc=loc)
 	return &pool.items[slot.handle]
+}
+
+static_slot_from_handle :: proc(pool: Static($T, $N), #any_int handle: int) -> Slot {
+	return {handle=auto_cast handle, gen_key=gen_key_from_key(pool.keys[handle])}
 }
 
 Iterator :: struct {
@@ -244,3 +260,4 @@ iterate        :: proc{static_iterate       , dynamic_iterate}
 iterate_by_ptr :: proc{static_iterate_by_ptr, dynamic_iterate_by_ptr}
 is_valid       :: proc{static_is_valid      , dynamic_is_valid} 
 safe_ptr       :: proc{static_safe_ptr} 
+slot_from_handle :: proc{static_slot_from_handle}
