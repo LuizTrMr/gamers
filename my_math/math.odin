@@ -2,6 +2,7 @@ package my_math
 
 import "base:intrinsics"
 
+import "core:c/libc"
 import "core:slice"
 import "core:fmt"
 import "core:math/linalg"
@@ -23,13 +24,10 @@ sqrt       :: math.sqrt
 floor      :: math.floor
 sign       :: math.sign_f32
 fmod       :: math.remainder
+cbrt       :: libc.cbrtf
 
 roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 	return cast(i32)(v + 0.5)
-}
-
-cbrt :: proc "contextless" (f: f32) -> f32 {
-	return math.pow(f, 1/3)
 }
 
 normalize_f32 :: proc "contextless" (start, end, value: f32) -> f32 {
@@ -610,6 +608,16 @@ fish :: proc "contextless" (t: f32, a, b: f32, tail: f32 = 1.0, θ: f32 = 0.0) -
 // Geometry I guess
 Rect :: struct {
 	start, size: V2,
+}
+
+collides_rect :: proc(a, b: Rect) -> bool {
+	switch {
+	case a.start.x+a.size.x < b.start.x: return false
+	case a.start.y+a.size.y < b.start.y: return false
+	case a.start.x > b.start.x+b.size.x: return false
+	case a.start.y > b.start.y+b.size.y: return false
+	}
+	return true
 }
 
 Bounds :: struct {
