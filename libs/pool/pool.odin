@@ -1,8 +1,7 @@
 // Pointer stable pool.
-// We use generation keys to know if an item is valid.
-// We store if an item is active and if it is valid in a separate slice of `Key`s that encode both infos.
+// We use generation keys to know if an item is the same.
+// We store if an item is active and its generation key in a separate slice of `Key`s that encodes both.
 // Free slots are found by linear search. This could be improved.
-// TODO: Add a way to initiate a Dynamic pool from a backing slice of T items
 package libs_pool
 
 import "base:runtime"
@@ -26,8 +25,6 @@ Static :: struct($T: typeid, $N: int) {
 	len  : int,
 }
 
-// TODO: Doesn't make sense to up the gen_key when we reserve, we need to up it when we remove because
-//       that is when the slot gets invalidated. @gen_keys
 static_reserve_slot :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (res:Slot) {
 	for key, handle in pool.keys {
 		if !is_active_from_key(key) {
@@ -47,6 +44,7 @@ static_reserve_slot :: proc(pool: ^Static($T, $N), loc := #caller_location) -> (
 
 static_append :: proc(pool: ^Static($T, $N), item: T, loc := #caller_location) -> (res:Slot) {
 	slot := static_reserve_slot(pool, loc)
+	pool.items[slot.handle] = item
 	return slot
 }
 
@@ -63,9 +61,9 @@ static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #calle
 	// Inactivate that slot in the pool
 	next_key = current_key & Key(~ACTIVE_BIT)
 
-	// Up the gen_key
+	// Add to the gen_key
 	gen_key := gen_key_from_key(next_key)
-	next_key = gen_key+1
+	next_key = Key(gen_key)+1
 
 	// Commit changes
 	pool.keys[handle] = next_key
@@ -75,7 +73,7 @@ static_remove :: proc(pool: ^Static($T, $N), #any_int handle: int, loc := #calle
 }
 
 static_remove_slot :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) {
-	assert( static_is_valid(pool.slot) )
+	assert( static_is_valid(pool^, slot) )
 	static_remove(pool, slot.handle, loc)
 }
 
@@ -89,6 +87,10 @@ static_clear :: proc(pool: ^Static($T, $N)) {
 	pool.items = {}
 	pool.keys  = {}
 	pool.len   = 0
+}
+
+item :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> T {
+	return pool.items[slot.handle]
 }
 
 ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
@@ -150,26 +152,25 @@ allocate :: proc(pool: ^Dynamic($T), n: int, allocator: runtime.Allocator, loc :
 	err: runtime.Allocator_Error
 	pool.items, err = make_slice([]T  , n, pool.allocator)
 	assert(err == nil, loc=loc)
-	pool.actives, err = make_slice([]bool, n, pool.allocator)
+	pool.keys, err = make_slice([]Key, n, pool.allocator)
 	assert(err == nil, loc=loc)
 }
 
 dynamic_free :: proc(pool: ^Dynamic($T), loc := #caller_location) {
 	err: runtime.Allocator_Error
-	err = delete_slice(pool.items  , pool.allocator)
+	err = delete_slice(pool.items, pool.allocator)
 	assert(err == nil, loc=loc)
-	err = delete_slice(pool.actives, pool.allocator)
+	err = delete_slice(pool.keys, pool.allocator)
 	assert(err == nil, loc=loc)
 }
 
-dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) -> int {
+dynamic_reserve_slot :: proc(pool: ^Dynamic($T), loc := #caller_location) -> (res:Slot) {
 	for key, handle in pool.keys {
 		if !is_active_from_key(key) {
 			gen_key := gen_key_from_key(pool.keys[handle])
-			gen_key += 1
 
 			pool.keys[handle] = Key(gen_key | ACTIVE_BIT)
-			pool.items[handle] = item
+			pool.items[handle] = {} // Zero it
 
 			res.gen_key = gen_key
 			res.handle = auto_cast handle
@@ -177,20 +178,37 @@ dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) -> 
 			return
 		}
 	}
-	assert(false, "Trying to alloc more than the budget", loc=loc)
-	return -1
+	panic("Trying to alloc more than the budget", loc=loc)
 }
 
-dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> (^T, int) {
-	zero: T
-	handle := dynamic_append(pool, zero, loc)
-	return &pool.items[handle], handle
+dynamic_append :: proc(pool: ^Dynamic($T), item: T, loc := #caller_location) -> (res:Slot) {
+	slot := dynamic_reserve_slot(pool, loc)
+	pool.items[slot.handle] = item
+	return slot
 }
 
 dynamic_remove :: proc(pool: ^Dynamic($T), #any_int handle: int, loc := #caller_location) {
-	assert(pool.actives[handle], loc=loc)
-	pool.actives[handle] = !pool.actives[handle]
+	assert(is_active_from_key(pool.keys[handle]), loc=loc)
+	current_key := pool.keys[handle]
+	next_key: Key
+
+	// Inactivate that slot in the pool
+	next_key = current_key & Key(~ACTIVE_BIT)
+
+	// Add to the gen_key
+	gen_key := gen_key_from_key(next_key)
+	next_key = Key(gen_key)+1
+
+	// Commit changes
+	pool.keys[handle] = next_key
+
+	// We removed an item
 	pool.len -= 1
+}
+
+dynamic_alloc_item :: proc(pool: ^Dynamic($T), loc := #caller_location) -> (^T, Slot) {
+	slot := dynamic_reserve_slot(pool, loc)
+	return &pool.items[slot.handle], slot
 }
 
 dynamic_batch_remove :: proc(pool: ^Dynamic($T), handles: []int, loc := #caller_location) {
@@ -200,9 +218,9 @@ dynamic_batch_remove :: proc(pool: ^Dynamic($T), handles: []int, loc := #caller_
 }
 
 dynamic_clear :: proc(pool: ^Dynamic($T)) {
-	pool.items   = {}
-	pool.actives = {}
-	pool.len     = 0
+	pool.items  = {}
+	pool.keys   = {}
+	pool.len    = 0
 }
 
 dynamic_iterate :: proc(it: ^Iterator, pool: Dynamic($T)) -> (v:T, handle:int, more:bool) {
@@ -233,6 +251,16 @@ dynamic_iterate_by_ptr :: proc(it: ^Iterator, pool: ^Dynamic($T)) -> (v:^T, hand
 	more = true
 	it.index += 1
 	return
+}
+
+dynamic_init_from_slice :: proc(pool: ^Dynamic($T), slice: $E/[]T, allocator: runtime.Allocator, loc := #caller_location) {
+	pool.allocator = allocator
+	pool.items = slice
+	pool.keys = make([]Key, len(slice), pool.allocator)
+}
+
+dynamic_delete_from_slice :: proc(pool: ^Dynamic($T), slice: $E/[]T, allocator: runtime.Allocator, loc := #caller_location) {
+	delete(pool.keys, pool.allocator)
 }
 
 static_handle_is_active :: proc "contextless"(p: Static($T,$N), #any_int handle: int) -> bool { return is_active_from_key(p.keys[handle]) }
