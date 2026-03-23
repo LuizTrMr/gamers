@@ -93,7 +93,7 @@ item :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> T {
 	return pool.items[slot.handle]
 }
 
-ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
+static_ptr :: proc(pool: ^Static($T, $N), slot: Slot, loc := #caller_location) -> ^T {
 	return &pool.items[slot.handle]
 }
 
@@ -223,6 +223,10 @@ dynamic_clear :: proc(pool: ^Dynamic($T)) {
 	pool.len    = 0
 }
 
+dynamic_ptr :: proc(pool: ^Dynamic($T), slot: Slot, loc := #caller_location) -> ^T {
+	return &pool.items[slot.handle]
+}
+
 dynamic_iterate :: proc(it: ^Iterator, pool: Dynamic($T)) -> (v:T, handle:int, more:bool) {
 	for it.index < len(pool.items) && !is_active_from_key(pool.keys[it.index]) {
 		it.index += 1
@@ -287,5 +291,6 @@ clear          :: proc{static_clear         , dynamic_clear}
 iterate        :: proc{static_iterate       , dynamic_iterate}
 iterate_by_ptr :: proc{static_iterate_by_ptr, dynamic_iterate_by_ptr}
 is_valid       :: proc{static_is_valid      , dynamic_is_valid} 
+ptr            :: proc{static_ptr           , dynamic_ptr} 
 safe_ptr       :: proc{static_safe_ptr} 
 slot_from_handle :: proc{static_slot_from_handle}
