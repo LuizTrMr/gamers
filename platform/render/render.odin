@@ -1,3 +1,4 @@
+#+feature using-stmt
 package platform_render
 
 import "base:intrinsics"
@@ -461,6 +462,7 @@ camera2d_screen_from_world_position :: proc(position: [2]f32, camera: Camera2D) 
 	return _camera2d_screen_from_world_position(position, camera)
 }
 
+Frame_Buffer :: Buffer_Target
 @(private)
 there_is_a_buffer_target_in_use: bool
 @(private)
@@ -480,9 +482,6 @@ Uniform_Datatype :: enum i32 {
 	matrix4,
 }
 
-buffer_target_load :: proc(width, height: i32) -> Buffer_Target {
-	return _buffer_target_load(width, height)
-}
 buffer_target_unload :: proc(target: Buffer_Target) {
 	_buffer_target_unload(target)
 }
@@ -582,6 +581,8 @@ unload_image :: proc(img: Image) {
 load_image_from_texture :: proc(texture: Texture) -> Image {
 	return _load_image_from_texture(texture)
 }
+
+load_image_from_memory :: #force_inline proc(data: []u8) -> Image { return _load_image_from_memory(data) }
 
 Option :: enum {
 	enabled,

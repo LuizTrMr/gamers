@@ -94,7 +94,7 @@ image_to_raylib_image :: proc(img: Image) -> (res:rl.Image) {
 raylib_image_to_image :: proc(rlimg: rl.Image) -> (res:Image) {
 	res.data   = rlimg.data
 	res.width  = rlimg.width
-	res.height = rlimg.width
+	res.height = rlimg.height
 	#partial switch rlimg.format {
 	case .UNCOMPRESSED_R8G8B8   : res.format = .RGB8
 	case .UNCOMPRESSED_R8G8B8A8 : res.format = .RGBA8
@@ -120,6 +120,11 @@ _load_image_from_texture :: proc(texture: Texture) -> Image {
 	return raylib_image_to_image(rlimg)
 }
 
+_load_image_from_memory :: proc(data: []u8) -> Image {
+	rlimg := rl.LoadImageFromMemory(".png", &data[0], auto_cast len(data))
+	return raylib_image_to_image(rlimg)
+}
+
 load_font :: proc(path: string) -> Font {
 	return rl.LoadFont( cstring(raw_data(path)) )
 }
@@ -142,6 +147,10 @@ _load_shader_from_memory :: proc(vertex_data, fragment_data: []u8) -> Shader {
 
 _load_shader_from_path :: proc(vertex_path, fragment_path: cstring) -> Shader {
 	return rl.LoadShader(vertex_path, fragment_path)
+}
+
+unload_shader :: proc(shader: Shader) {
+	rl.UnloadShader(shader)
 }
 
 _clear :: proc(options: bit_set[Clear_Option], color: Color) {
@@ -425,6 +434,37 @@ _buffer_target_end :: proc "contextless" () {
 	rl.EndTextureMode()
 }
 
+buffer_target_load :: proc(width, height: i32, format: rl.PixelFormat = .UNCOMPRESSED_R8G8B8A8) -> Buffer_Target {
+	if format == .UNCOMPRESSED_R8G8B8A8 do return _buffer_target_load(width, height)
+
+	target: rl.RenderTexture
+	target.id = rlgl.LoadFramebuffer()
+	rlgl.EnableFramebuffer(target.id)
+	target.texture.width  = width
+	target.texture.height = height
+	target.texture.format = format
+	target.texture.mipmaps = 1
+	target.texture.id = rlgl.LoadTexture(nil, target.texture.width, target.texture.height, i32(target.texture.format), target.texture.mipmaps)
+	rlgl.FramebufferAttach(target.id, target.texture.id,
+		auto_cast rlgl.FramebufferAttachType.COLOR_CHANNEL0,
+		auto_cast rlgl.FramebufferAttachTextureType.TEXTURE2D,
+		0)
+
+	target.depth.width = width
+	target.depth.height = height
+	target.depth.id = rlgl.LoadTextureDepth(width, height, false)
+	target.depth.format = .COMPRESSED_ETC2_RGB
+	target.depth.mipmaps = 1
+
+	rlgl.FramebufferAttach(target.id, target.depth.id,
+		auto_cast rlgl.FramebufferAttachType.DEPTH,
+		auto_cast rlgl.FramebufferAttachTextureType.TEXTURE2D,
+		0)
+
+	assert(rlgl.FramebufferComplete(target.id))
+	rlgl.DisableFramebuffer()
+	return target
+}
 
 Shader :: rl.Shader
 _shader_use_begin :: proc(shader: Shader) {
