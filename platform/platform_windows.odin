@@ -4,23 +4,22 @@ package platform
 
 import "core:fmt"
 import "core:strings"
-import  "core:os"
-import os2 "core:os/os2"
+import "core:os"
 
 _create_or_open :: proc(path: string) -> (os.Handle, os.Error) {
 	return os.open(path, os.O_WRONLY|os.O_TRUNC|os.O_CREATE)
 }
 
 create_file_if_needed :: proc(path: string) {
-	if !os2.exists(path) {
-		_, err := os2.create(path)
+	if !os.exists(path) {
+		_, err := os.create(path)
 		assert(err == nil, fmt.tprint(err))
 	}
 }
 
 create_directory_if_needed :: proc(path: string) {
-	if !os2.exists(path) {
-		err := os2.make_directory(path)
+	if !os.exists(path) {
+		err := os.make_directory(path)
 		assert(err == nil, fmt.tprint(err))
 	}
 }

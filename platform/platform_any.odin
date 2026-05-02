@@ -2,8 +2,8 @@
 
 package platform
 
-import    "core:fmt"
-import os "core:os/os2"
+import "core:fmt"
+import "core:os"
 
 import rl "vendor:raylib"
 
@@ -26,7 +26,7 @@ _get_frame_duration :: proc() -> f32 {
 }
 
 _open_simple :: proc(path: string) -> (^os.File, os.Error) {
-	return os.open(path, os.O_RDWR | os.O_TRUNC | os.O_CREATE, 0o777)
+	return os.open(path, {.Read,.Write,.Create,.Trunc}, perm=os.Permissions_All)
 }
 
 _copy_file_from_to :: proc(from, to: string) {
