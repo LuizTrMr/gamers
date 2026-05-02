@@ -2,7 +2,6 @@ package my_math
 
 import "base:intrinsics"
 
-import "core:c/libc"
 import "core:slice"
 import "core:fmt"
 import "core:math/linalg"
@@ -24,7 +23,10 @@ sqrt       :: math.sqrt
 floor      :: math.floor
 sign       :: math.sign_f32
 fmod       :: math.remainder
-cbrt       :: libc.cbrtf
+
+cbrt :: proc "contextless" (v: f32) -> f32 {
+	return math.pow(v, 1./3.)
+}
 
 roundf32_to_i32 :: proc "contextless" (v: f32) -> i32 {
 	return cast(i32)(v + 0.5)
@@ -162,7 +164,6 @@ is_near :: proc{is_near_f32, is_near_v2}
 v2_components_are_equal :: proc(to_test, fixed: V2) -> bool {
 	return is_near_f32(fixed.x, to_test.x, 0.001) && is_near_f32(fixed.y, to_test.y, 0.001)
 }
-
 
 sample_point_inside_rect :: proc(bound_a, bound_b: V2) -> (result: V2) {
 	result.x = rand.float32_range(bound_a.x, bound_b.x)
@@ -605,9 +606,20 @@ fish :: proc "contextless" (t: f32, a, b: f32, tail: f32 = 1.0, θ: f32 = 0.0) -
 	return
 }
 
-// Geometry I guess
+// @geometry @Geometry
+Raycast :: struct {
+	start: V2,
+	ray  : V2,
+}
+
+Axis :: enum {
+	Horizontal,
+	Vertical,
+}
+
 Rect :: struct {
-	start, size: V2,
+	using start: V2,
+	size: V2,
 }
 
 collides_rect :: proc(a, b: Rect) -> bool {
@@ -620,7 +632,7 @@ collides_rect :: proc(a, b: Rect) -> bool {
 	return true
 }
 
-Bounds :: struct {
+Bounds :: struct { // NOTE: This is actually trash to use, Rect is way better, but yeah it is gonna be here for a while cause I am made a game using bounds everyone and I can't change it now.
 	start: V2,
 	end  : V2,
 }
@@ -631,11 +643,13 @@ bounds_from_start_and_size :: proc(start, size: V2) -> (res:Bounds) {
 	return
 }
 
-bounds_size :: proc "contextless" (b: Bounds) -> V2 {
+bounds_size :: proc(b: Bounds) -> V2 {
+	assert(b.end.x > b.start.x)
+	assert(b.end.y > b.start.y)
 	return b.end-b.start
 }
 
-bounds_center :: proc "contextless" (b: Bounds) -> V2 {
+bounds_center :: proc(b: Bounds) -> V2 {
 	return b.start+bounds_size(b)/2
 }
 
@@ -659,16 +673,16 @@ clockwise_points_from_bounds :: proc(bounds: Bounds) -> (p0, p1, p2, p3: V2) {
 	return
 }
 
-is_point_inside_rect_struct :: proc "contextless" (p: V2, rect: Rect) -> bool {
+is_point_inside_rect_struct :: proc(p: V2, rect: Rect) -> bool {
 	return is_point_inside_dimensions(p, rect.start, rect.size)
 }
 
-is_point_inside_dimensions :: proc "contextless" (p: V2, start: V2, size: V2) -> bool {
+is_point_inside_dimensions :: proc(p: V2, start: V2, size: V2) -> bool {
 	return p.x >= start.x && p.x <= start.x+size.x && p.y >= start.y && p.y <= start.y+size.y
 }
 is_point_inside_rect :: proc{is_point_inside_rect_struct, is_point_inside_dimensions}
 
-is_point_inside_bounds :: proc "contextless" (p: V2, b: Bounds) -> bool {
+is_point_inside_bounds :: proc(p: V2, b: Bounds) -> bool {
 	return is_point_inside_rect(p, b.start, bounds_size(b))
 }
 
