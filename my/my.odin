@@ -2,6 +2,7 @@ package gamers_my
 
 import "core:mem"
 import "core:mem/virtual"
+import "core:time"
 
 Arena :: struct {
 	using internal: mem.Arena,
@@ -32,7 +33,51 @@ Period :: struct {
 }
 period_t :: proc "contextless" (period: Period) -> f32 { return period.curr / period.total }
 
+/*
+	Wraps `value` around [0,`m`-1]
+*/
 wrap :: proc "contextless" (value, m: $T) -> T {
 	value := (value % m + m) % m
 	return value
+}
+
+clamp_bot :: max
+max_vector :: proc(vector0: [$N]f32, vector1: [N]f32) -> (res:[N]f32)
+where N > 0 {
+	for index in 0..<N {
+		res[index] = max(vector0[index], vector1[index])
+	}
+	return res
+}
+clamp_bot_vector :: max_vector
+
+clamp_top :: min
+min_vector :: proc(vector0: [$N]f32, vector1: [N]f32) -> (res:[N]f32)
+where N > 0 {
+	for index in 0..<N {
+		res[index] = min(vector0[index], vector1[index])
+	}
+	return res
+}
+clamp_top_vector :: min_vector
+
+Timestamp :: time.Time
+seconds_since_timestamp :: proc(timestamp: Timestamp) -> f32 {
+	return cast(f32)time.duration_seconds(time.since(timestamp))
+}
+
+abs_vector :: proc(vector: [$N]f32) -> (res:[N]f32)
+where N > 0 {
+	for index in 0..<N {
+		res[index] = abs(vector[index])
+	}
+	return
+}
+
+clamp_vector :: proc(value, min, max: [$N]f32) -> (res:[N]f32)
+where N > 0 {
+	for index in 0..<N {
+		res[index] = clamp(value[index], min[index], max[index])
+	}
+	return
 }
