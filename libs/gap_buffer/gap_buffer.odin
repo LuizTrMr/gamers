@@ -77,16 +77,7 @@ write_byte :: proc(buffer: ^Gap_Buffer, byte: u8) -> bool {
 	return true
 }
 user_can_move_right :: #force_inline proc "contextless" (buffer: Gap_Buffer) -> bool {
-	end := buffer.gap_start+buffer.gap_size
-	left := len(buffer.buf)-end
-	can_move: bool
-	for index in end..<end+left {
-		if buffer.buf[index] != 0 { // there is content, so user can move
-			can_move = true
-			break
-		}
-	}
-	return can_move
+	return buffer.gap_start+buffer.gap_size < len(buffer.buf)-1
 }
 user_can_move_left :: #force_inline proc "contextless" (buffer: Gap_Buffer) -> bool {
 	return buffer.gap_start > 0
@@ -139,4 +130,11 @@ index_of_content_end :: proc(buffer: Gap_Buffer) -> (index:int) {
 		index = buffer.gap_start
 	}
 	return
+}
+
+rune_at_cursor :: proc(gb: Gap_Buffer) -> rune {
+	if gb.gap_start + gb.gap_size < len(gb.buf) {
+		return rune(gb.buf[gb.gap_start+gb.gap_size])
+	}
+	return rune(gb.buf[len(gb.buf)-1])
 }
