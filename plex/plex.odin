@@ -13,7 +13,10 @@ import "core:strconv"
 import "core:log"
 
 // TODO:
-//  - Convert the structs in the game from serder to .plex type
+// - Error parsing empty string
+// ERROR at /Users/lftm/Odin/gamers/plex/plex.odin(709:4):
+// Failed to parse file `assets/save_data.plex` at line `28`:
+//                 .en= "",
 
 Serializer_Config :: struct {
 	float_precision: int,
