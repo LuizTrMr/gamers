@@ -107,7 +107,7 @@ u32_to_color :: proc "c" (u: u32, a: f32 = 1.0) -> (res: Color) { // NOTE(16/02/
 	res.r = f32(r) / 255
 	res.g = f32(g) / 255
 	res.b = f32(b) / 255
-	res.a = 1.0
+	res.a = a
 
 	return
 }
