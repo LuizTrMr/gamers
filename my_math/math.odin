@@ -632,7 +632,61 @@ collides_rect :: proc(a, b: Rect) -> bool {
 	return true
 }
 
-Bounds :: struct { // NOTE: This is actually trash to use, Rect is way better, but yeah it is gonna be here for a while cause I am made a game using bounds everyone and I can't change it now.
+get_collision_rect :: proc(a, b: Rect) -> (overlap: Rect) {
+	// Intetion: Left is going to be the biggest between the two rects, same for top
+	left := a.x > b.x ? a.x : b.x
+	top  := a.y > b.y ? a.y : b.y
+
+	// Intetion: Right will be the smallest between the two rects, same for bottom
+	right: f32
+	if a.x+a.size.x > b.x+b.size.x {
+		right = b.x+b.size.x
+	}
+	else {
+		right = a.x+a.size.x
+	}
+
+	bottom: f32
+	if a.y+a.size.y > b.y+b.size.y {
+		bottom = b.y+b.size.y
+	}
+	else {
+		bottom = a.y+a.size.y
+	}
+
+	// Intention: If we don't collide return zero
+	if left < right && top < bottom {
+		overlap = {
+			start = {left,top},
+			size  = {right-left, bottom-top},
+		}
+	}
+	return 
+}
+
+// NOTE: The way you "push" the dynamic rect away from the static rect depends on what order you
+// pass them as parameters (and obviously on the direction of your axes).
+// For positive right and down: If you pass the dynamic body as the first param and the static body
+// as second, you should *subtract* the dynamic body's position from the returned rect. So, if you
+// invert the order of the params, you should then *add* to the dynamic body's position.
+get_signed_collision_rect :: proc(a, b: Rect) -> Rect {
+	collision_rect := get_collision_rect(a, b)
+	if b.x < a.x {
+		collision_rect.size.x = -collision_rect.size.x
+	}
+	if b.y < a.y {
+		collision_rect.size.y = -collision_rect.size.y
+	}
+	return collision_rect
+}
+
+bounds_from_rect :: proc(r: Rect) -> Bounds {
+	return {
+		start = r.start,
+		end   = r.start+r.size,
+	}
+}
+Bounds :: struct { // NOTE: This is actually trash to use(not always), Rect is way better, but yeah it is gonna be here for a while cause I am made a game using bounds everyone and I can't change it now.
 	start: V2,
 	end  : V2,
 }
